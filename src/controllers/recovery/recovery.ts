@@ -75,7 +75,12 @@ import {
  */
 
 /** Which op the live `signAccountOpController` is preparing. */
-export type RecoveryPhase = 'activate' | 'recover'
+// 'activate' = deploy the 3 recovery contracts (CREATE2). 'install' = bind the
+// controller into the adapter + authorize it on Account A. Split into two ops
+// because deploying three contracts AND wiring them in a single batch exceeds a
+// safe per-op gas budget (the estimator under-counts CREATE2 deploys, which
+// out-of-gassed the combined batch). 'recover' = Account B rotates A -> B.
+export type RecoveryPhase = 'activate' | 'install' | 'recover'
 
 /** Lifecycle status of the most recent Activate/Recover attempt. */
 export type RecoveryStatus =
@@ -515,29 +520,67 @@ export class RecoveryController extends EventEmitter {
     this.adapterAddr = adapterAddr
     this.controllerAddr = controllerAddr
 
+    const calls: Call[] = [
+      // Deploy the three recovery contracts via the CREATE2 singleton (to: null is
+      // routed by toSingletonCall). Wiring + authorization happen in installRecovery()
+      // as a SECOND op — see the RecoveryPhase note: deploying 3 contracts AND wiring
+      // in one batch out-of-gassed (the estimator under-counts CREATE2 deploys).
+      { to: null as unknown as string, value: 0n, data: methodInit },
+      { to: null as unknown as string, value: 0n, data: adapterInit },
+      { to: null as unknown as string, value: 0n, data: controllerInit }
+    ]
+
+    await this.#initSignAccOp(calls, 'activate')
+  }
+
+  /**
+   * STEP 1b — bind + authorize, after activate() deployed the contracts. Runs as a
+   * SECOND signed op on Account A: setController on the adapter, then setAddrPrivilege
+   * authorizing the adapter as a recovery executor on A. Split from activate() so each
+   * op stays within a safe gas budget (see RecoveryPhase note).
+   */
+  async installRecovery(): Promise<void> {
+    await this.#initialPromise
+
+    const account = this.#selectedAccount?.account
+    if (!account) {
+      this.status = 'error'
+      this.lastError = 'No account selected to install recovery on.'
+      this.emitUpdate()
+      return
+    }
+    if (!this.adapterAddr || !this.controllerAddr) {
+      this.status = 'error'
+      this.lastError = 'Run Activate (deploy) first — recovery contracts are not deployed yet.'
+      this.emitUpdate()
+      return
+    }
+
+    this.destroySignAccountOp()
+    this.status = 'preparing'
+    this.lastError = null
+    this.emitUpdate()
+
+    const A = getAddress(account.addr)
     const adapterIface = new Interface(AMBIRE_EXECUTOR_ADAPTER.abi as any)
     const ambireIface = new Interface(AmbireAccount.abi)
 
     const calls: Call[] = [
-      // 1-3: deploy via the CREATE2 singleton (to: null is routed by toSingletonCall).
-      { to: null as unknown as string, value: 0n, data: methodInit },
-      { to: null as unknown as string, value: 0n, data: adapterInit },
-      { to: null as unknown as string, value: 0n, data: controllerInit },
-      // 4: bind the controller into the adapter (one-time; closes the ctor cycle).
+      // 1: bind the controller into the adapter (one-time; closes the ctor cycle).
       {
-        to: adapterAddr,
+        to: this.adapterAddr,
         value: 0n,
-        data: adapterIface.encodeFunctionData('setController', [controllerAddr])
+        data: adapterIface.encodeFunctionData('setController', [this.controllerAddr])
       },
-      // 5: authorize the adapter as a privileged executor on A (A self-call in its batch).
+      // 2: authorize the adapter as a privileged executor on A (A self-call in its batch).
       {
         to: A,
         value: 0n,
-        data: ambireIface.encodeFunctionData('setAddrPrivilege', [adapterAddr, PRIV_AUTHORIZED])
+        data: ambireIface.encodeFunctionData('setAddrPrivilege', [this.adapterAddr, PRIV_AUTHORIZED])
       }
     ]
 
-    await this.#initSignAccOp(calls, 'activate')
+    await this.#initSignAccOp(calls, 'install')
   }
 
   /**

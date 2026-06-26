@@ -2178,9 +2178,14 @@ export class MainController extends EventEmitter {
       // and tear down the SignAccountOpController so the next op can initialize.
       const phase = this.recovery.phase
       if (phase) this.recovery.txHashes[phase] = submittedAccountOp.txnId
-      if (phase === 'activate') {
-        this.recovery.activated = true
+      // 'activate' only deploys the contracts; recovery is fully usable after
+      // 'install' (controller bound + adapter authorized on A). Persist on either
+      // so the addresses survive reload, but only mark `activated` after install.
+      if (phase === 'activate' || phase === 'install') {
         await this.recovery.persistDeployment()
+      }
+      if (phase === 'install') {
+        this.recovery.activated = true
       }
       this.recovery.status = 'broadcasted'
       this.recovery.destroySignAccountOp()
