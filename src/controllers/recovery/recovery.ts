@@ -544,15 +544,39 @@ export class RecoveryController extends EventEmitter {
     this.adapterAddr = adapterAddr
     this.controllerAddr = controllerAddr
 
-    const calls: Call[] = [
-      // Deploy the three recovery contracts via the CREATE2 singleton (to: null is
-      // routed by toSingletonCall). Wiring + authorization happen in installRecovery()
-      // as a SECOND op — see the RecoveryPhase note: deploying 3 contracts AND wiring
-      // in one batch out-of-gassed (the estimator under-counts CREATE2 deploys).
-      { to: null as unknown as string, value: 0n, data: methodInit },
-      { to: null as unknown as string, value: 0n, data: adapterInit },
-      { to: null as unknown as string, value: 0n, data: controllerInit }
-    ]
+    // Deploy via CREATE2 singleton (to: null is routed by toSingletonCall). Wiring +
+    // authorization happen in installRecovery() as a SECOND op (gas — see RecoveryPhase).
+    // IDEMPOTENT: skip any contract already on-chain. Addresses are deterministic
+    // (CREATE2), so a partially-completed prior attempt (e.g. method+adapter landed but
+    // the controller deploy ran out of gas) is repaired by re-running — only the missing
+    // contract(s) are (re)deployed, and they land at the SAME reserved addresses the
+    // adapter already references.
+    const provider = this.#providers.providers[this.chainId.toString()]
+    const isDeployed = async (addr: string): Promise<boolean> => {
+      if (!provider) return false
+      try {
+        const code = await (provider as any).getCode(getAddress(addr))
+        return !!code && code !== '0x'
+      } catch {
+        return false
+      }
+    }
+
+    const calls: Call[] = []
+    if (!(await isDeployed(methodAddr)))
+      calls.push({ to: null as unknown as string, value: 0n, data: methodInit })
+    if (!(await isDeployed(adapterAddr)))
+      calls.push({ to: null as unknown as string, value: 0n, data: adapterInit })
+    if (!(await isDeployed(controllerAddr)))
+      calls.push({ to: null as unknown as string, value: 0n, data: controllerInit })
+
+    if (calls.length === 0) {
+      // All three already on-chain — nothing to deploy; move straight to install.
+      this.status = 'initial'
+      this.lastError = null
+      this.emitUpdate()
+      return
+    }
 
     await this.#initSignAccOp(calls, 'activate')
   }
@@ -589,20 +613,59 @@ export class RecoveryController extends EventEmitter {
     const adapterIface = new Interface(AMBIRE_EXECUTOR_ADAPTER.abi as any)
     const ambireIface = new Interface(AmbireAccount.abi)
 
-    const calls: Call[] = [
-      // 1: bind the controller into the adapter (one-time; closes the ctor cycle).
-      {
+    // IDEMPOTENT: skip steps already done on-chain. setController is one-shot (reverts
+    // if already set) and setAddrPrivilege is a no-op if already authorized — so a prior
+    // partial Install (e.g. adapter authorized but controller wasn't deployed yet) is
+    // repaired without reverting on the already-completed step.
+    const provider = this.#providers.providers[this.chainId.toString()]
+    const calls: Call[] = []
+    try {
+      const adapter = new Contract(this.adapterAddr, AMBIRE_EXECUTOR_ADAPTER.abi as any, provider as any)
+      const currentController: string = await adapter.controller()
+      if (BigInt(currentController) === 0n) {
+        // 1: bind the controller into the adapter (one-time; closes the ctor cycle).
+        calls.push({
+          to: this.adapterAddr,
+          value: 0n,
+          data: adapterIface.encodeFunctionData('setController', [this.controllerAddr])
+        })
+      }
+    } catch {
+      // Can't read adapter (RPC issue) — include the bind and let chain enforce one-shot.
+      calls.push({
         to: this.adapterAddr,
         value: 0n,
         data: adapterIface.encodeFunctionData('setController', [this.controllerAddr])
-      },
-      // 2: authorize the adapter as a privileged executor on A (A self-call in its batch).
-      {
+      })
+    }
+    try {
+      const acct = new Contract(A, AmbireAccount.abi, provider as any)
+      const priv: string = await acct.privileges(getAddress(this.adapterAddr))
+      if (BigInt(priv) === 0n) {
+        // 2: authorize the adapter as a privileged executor on A (A self-call in its batch).
+        calls.push({
+          to: A,
+          value: 0n,
+          data: ambireIface.encodeFunctionData('setAddrPrivilege', [this.adapterAddr, PRIV_AUTHORIZED])
+        })
+      }
+    } catch {
+      calls.push({
         to: A,
         value: 0n,
         data: ambireIface.encodeFunctionData('setAddrPrivilege', [this.adapterAddr, PRIV_AUTHORIZED])
-      }
-    ]
+      })
+    }
+
+    if (calls.length === 0) {
+      // Already fully installed on-chain — nothing to do; reflect activated state.
+      this.activated = true
+      this.status = 'broadcasted'
+      this.lastError = null
+      await this.persistDeployment()
+      this.emitUpdate()
+      return
+    }
 
     await this.#initSignAccOp(calls, 'install')
   }
