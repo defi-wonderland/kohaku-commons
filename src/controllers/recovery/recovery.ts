@@ -297,14 +297,20 @@ export class RecoveryController extends EventEmitter {
   }
 
   /**
-   * On-chain source of truth for activation: the adapter must have deployed code
-   * AND be authorized on Account A (privileges != 0). Either failing means the
-   * persisted record is stale (e.g. a reverted deploy) — treat as NOT activated.
+   * On-chain source of truth for activation. ALL must hold, else the persisted
+   * record is stale / the deploy was partial (e.g. controller out-of-gassed):
+   *   1. the RecoveryController has deployed code  (the piece that kept getting missed),
+   *   2. the adapter has deployed code,
+   *   3. the adapter is authorized on Account A (privileges != 0).
+   * Any failing → NOT activated (so a half-built attempt shows the un-activated UI
+   * and the idempotent Activate/Install can repair it).
    */
   async #verifyActivatedOnChain(record: RecoveryDeploymentRecord): Promise<boolean> {
     try {
       const provider = this.#providers.providers[this.chainId.toString()]
       if (!provider) return false
+      const controllerCode = await (provider as any).getCode(getAddress(record.controllerAddr))
+      if (!controllerCode || controllerCode === '0x') return false
       const adapterCode = await (provider as any).getCode(getAddress(record.adapterAddr))
       if (!adapterCode || adapterCode === '0x') return false
       const account = new Contract(getAddress(record.accountA), AmbireAccount.abi, provider as any)
