@@ -82,6 +82,7 @@ import {
   SIGN_ACCOUNT_OP_PRIVACY_POOLS,
   SIGN_ACCOUNT_OP_PRIVACY_POOLS_V1,
   SIGN_ACCOUNT_OP_RAILGUN,
+  SIGN_ACCOUNT_OP_RECOVERY,
   SIGN_ACCOUNT_OP_SWAP,
   SIGN_ACCOUNT_OP_TRANSFER,
   SignAccountOpType
@@ -559,7 +560,19 @@ export class MainController extends EventEmitter {
       this.fetch
     )
 
-    this.recovery = new RecoveryController(this.networks, this.providers)
+    this.recovery = new RecoveryController(
+      this.keystore,
+      this.accounts,
+      this.networks,
+      this.providers,
+      this.selectedAccount,
+      this.portfolio,
+      this.activity,
+      this.storage,
+      this.#externalSignerControllers,
+      railgunRelayerUrl,
+      this.fetch
+    )
   }
 
   /**
@@ -840,6 +853,8 @@ export class MainController extends EventEmitter {
       signAccountOp = this.privacyPoolsV1.signAccountOpController
     } else if (type === SIGN_ACCOUNT_OP_RAILGUN) {
       signAccountOp = this.railgun.signAccountOpController
+    } else if (type === SIGN_ACCOUNT_OP_RECOVERY) {
+      signAccountOp = this.recovery.signAccountOpController
     } else {
       signAccountOp = this.transfer.signAccountOpController
     }
@@ -1868,10 +1883,11 @@ export class MainController extends EventEmitter {
           if (txnLength > 1) signAccountOp.update({ signedTransactionsCount: i + 1 })
 
           // send the txn to the relayer if it's an EOA sending for itself
-          // Skip relayer for Railgun operations as they don't need relayer recording
+          // Skip relayer for Railgun/Recovery operations as they don't need relayer recording
           if (
             accountOp.gasFeePayment.broadcastOption !== BROADCAST_OPTIONS.byOtherEOA &&
-            type !== SIGN_ACCOUNT_OP_RAILGUN
+            type !== SIGN_ACCOUNT_OP_RAILGUN &&
+            type !== SIGN_ACCOUNT_OP_RECOVERY
           ) {
             this.callRelayer(`/v2/eoaSubmitTxn/${accountOp.chainId}`, 'POST', {
               rawTxn: signedTxn
@@ -2153,6 +2169,21 @@ export class MainController extends EventEmitter {
       // This prevents stale state issues on subsequent deposits
       // The SignAccountOpController will be destroyed when user navigates away
       this.railgun.resetForm()
+    }
+
+    if (type === SIGN_ACCOUNT_OP_RECOVERY) {
+      // Finalize the Activate/Recover op: record the tx hash for the phase, mark
+      // activation + persist the deployment (so it survives reload and is visible
+      // when the user switches to Account B to recover), surface broadcasted status,
+      // and tear down the SignAccountOpController so the next op can initialize.
+      const phase = this.recovery.phase
+      if (phase) this.recovery.txHashes[phase] = submittedAccountOp.txnId
+      if (phase === 'activate') {
+        this.recovery.activated = true
+        await this.recovery.persistDeployment()
+      }
+      this.recovery.status = 'broadcasted'
+      this.recovery.destroySignAccountOp()
     }
 
     await this.#notificationManager.create({
