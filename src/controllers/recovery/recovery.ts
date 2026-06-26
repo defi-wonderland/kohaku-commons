@@ -275,11 +275,15 @@ export class RecoveryController extends EventEmitter {
       ))
 
     if (record) {
-      this.activated = true
+      // A record only means we once predicted/broadcast a deployment — NOT that it
+      // landed on-chain (e.g. the deploy op could have reverted on gas). Load the
+      // addresses, then VERIFY against chain before claiming `activated`, so a stale
+      // record from a failed attempt self-heals instead of showing a false "activated".
       this.accountA = record.accountA
       this.controllerAddr = record.controllerAddr
       this.adapterAddr = record.adapterAddr
       this.methodAddr = record.methodAddr
+      this.activated = await this.#verifyActivatedOnChain(record)
     } else {
       // No record for this account (and no global one) — show un-activated state.
       this.activated = false
@@ -290,6 +294,26 @@ export class RecoveryController extends EventEmitter {
     }
 
     this.emitUpdate()
+  }
+
+  /**
+   * On-chain source of truth for activation: the adapter must have deployed code
+   * AND be authorized on Account A (privileges != 0). Either failing means the
+   * persisted record is stale (e.g. a reverted deploy) — treat as NOT activated.
+   */
+  async #verifyActivatedOnChain(record: RecoveryDeploymentRecord): Promise<boolean> {
+    try {
+      const provider = this.#providers.providers[this.chainId.toString()]
+      if (!provider) return false
+      const adapterCode = await (provider as any).getCode(getAddress(record.adapterAddr))
+      if (!adapterCode || adapterCode === '0x') return false
+      const account = new Contract(getAddress(record.accountA), AmbireAccount.abi, provider as any)
+      const priv: string = await account.privileges(getAddress(record.adapterAddr))
+      return BigInt(priv) !== 0n
+    } catch {
+      // RPC hiccup — don't assert activation we can't confirm.
+      return false
+    }
   }
 
   /**
