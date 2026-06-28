@@ -674,11 +674,32 @@ export class RecoveryController extends EventEmitter {
     }
 
     if (calls.length === 0) {
-      // Already fully installed on-chain — nothing to do; reflect activated state.
-      this.activated = true
-      this.status = 'broadcasted'
-      this.lastError = null
-      await this.persistDeployment()
+      // Wiring (setController + setAddrPrivilege) is already done — but that is NOT
+      // sufficient: the controller CONTRACT must also actually be deployed. A partial
+      // prior attempt can leave the adapter bound+authorized while the controller never
+      // landed at its predicted address. Only claim activated if the on-chain verify
+      // (controller code + adapter code + adapter authorized) passes; otherwise tell the
+      // user the controller deploy is still missing (re-run Activate).
+      const fullyActivated = !!this.controllerAddr && !!this.adapterAddr && !!this.accountA
+        ? await this.#verifyActivatedOnChain({
+            accountA: this.accountA,
+            controllerAddr: this.controllerAddr,
+            adapterAddr: this.adapterAddr,
+            methodAddr: this.methodAddr || ''
+          } as RecoveryDeploymentRecord)
+        : false
+
+      if (fullyActivated) {
+        this.activated = true
+        this.status = 'broadcasted'
+        this.lastError = null
+        await this.persistDeployment()
+      } else {
+        this.activated = false
+        this.status = 'error'
+        this.lastError =
+          'Recovery contracts are wired but the controller is not deployed. Run Activate again to deploy it.'
+      }
       this.emitUpdate()
       return
     }
