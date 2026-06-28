@@ -81,7 +81,10 @@ import {
 // because deploying three contracts AND wiring them in a single batch exceeds a
 // safe per-op gas budget (the estimator under-counts CREATE2 deploys, which
 // out-of-gassed the combined batch). 'recover' = Account B rotates A -> B.
-export type RecoveryPhase = 'activate' | 'install' | 'recover'
+// 'prove' = a post-recovery demonstration: Account B, now a privileged signer on A,
+// makes A send a tiny amount of ETH to B via A.executeBySender — concrete proof that
+// B controls A (B signs + pays; A's funds move using B's access).
+export type RecoveryPhase = 'activate' | 'install' | 'recover' | 'prove'
 
 /** Lifecycle status of the most recent Activate/Recover attempt. */
 export type RecoveryStatus =
@@ -184,7 +187,7 @@ export class RecoveryController extends EventEmitter {
   status: RecoveryStatus = 'initial'
 
   /** Broadcast tx hashes, keyed by phase. Captured by MainController post-broadcast. */
-  txHashes: { activate?: string; recover?: string } = {}
+  txHashes: { activate?: string; recover?: string; prove?: string } = {}
 
   lastError: string | null = null
 
@@ -756,6 +759,76 @@ export class RecoveryController extends EventEmitter {
     ]
 
     await this.#initSignAccOp(calls, 'recover')
+  }
+
+  /**
+   * PROVE — post-recovery demonstration that Account B controls Account A.
+   *
+   * Run with Account B selected (the new owner that recovery authorized on A). B,
+   * now a privileged signer on A, makes A send a tiny amount (0.000001 ETH) to B
+   * via `A.executeBySender([{ to: B, value, data: 0x }])`. B signs + pays the gas;
+   * A's funds move using B's access. If this succeeds, B genuinely controls A.
+   *
+   * Preconditions: A must be recovered (B authorized on A) and A must hold a little
+   * ETH to move. The selected account here is B (the spender); `accountA` is the
+   * account whose funds move.
+   */
+  async proveControl(): Promise<void> {
+    await this.#initialPromise
+
+    const spender = this.#selectedAccount?.account // expected to be Account B
+    if (!spender) {
+      this.status = 'error'
+      this.lastError = 'No account selected. Select Account B (the new owner) to prove control.'
+      this.emitUpdate()
+      return
+    }
+    if (!this.accountA) {
+      this.status = 'error'
+      this.lastError = 'No recovered account (A) on record. Activate + recover first.'
+      this.emitUpdate()
+      return
+    }
+
+    let A: string
+    let B: string
+    try {
+      A = getAddress(this.accountA)
+      B = getAddress(spender.addr)
+    } catch {
+      this.status = 'error'
+      this.lastError = 'Invalid account address.'
+      this.emitUpdate()
+      return
+    }
+
+    if (A.toLowerCase() === B.toLowerCase()) {
+      this.status = 'error'
+      this.lastError = 'Select Account B (the new owner), not Account A, to prove control.'
+      this.emitUpdate()
+      return
+    }
+
+    this.destroySignAccountOp()
+    this.status = 'preparing'
+    this.lastError = null
+    this.emitUpdate()
+
+    // The demonstration: B makes A pay 0.000001 ETH (1e12 wei) to B, through A's own
+    // executeBySender — authorized purely by B's privilege on A (granted by recovery).
+    const PROOF_AMOUNT_WEI = 1_000_000_000_000n // 0.000001 ETH
+    const ambireIface = new Interface(AmbireAccount.abi)
+    const innerTransfer = [{ to: B, value: PROOF_AMOUNT_WEI, data: '0x' }]
+
+    const calls: Call[] = [
+      {
+        to: A,
+        value: 0n,
+        data: ambireIface.encodeFunctionData('executeBySender', [innerTransfer])
+      }
+    ]
+
+    await this.#initSignAccOp(calls, 'prove')
   }
 
   /**
