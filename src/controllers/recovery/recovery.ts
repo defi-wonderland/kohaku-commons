@@ -194,6 +194,15 @@ export class RecoveryController extends EventEmitter {
   /** True once `newOwner` holds a non-zero privilege on Account A (post-recovery). */
   newOwnerIsAuthorizedOnA: boolean = false
 
+  /**
+   * True when the CURRENTLY SELECTED account holds a non-zero privilege on the
+   * recovered `accountA` — i.e. "the account I'm using now controls A." This is what
+   * gates the Prove step: after recovery the user switches to B (the selected account),
+   * which is NOT `accountA`, so `newOwnerIsAuthorizedOnA` (keyed off the newOwner input)
+   * is the wrong signal. This flag is computed against the selected account directly.
+   */
+  selectedControlsA: boolean = false
+
   chainId: number = Number(CHAIN_ID)
 
   constructor(
@@ -295,9 +304,17 @@ export class RecoveryController extends EventEmitter {
       this.controllerAddr = null
       this.adapterAddr = null
       this.methodAddr = null
+      this.selectedControlsA = false
     }
 
     this.emitUpdate()
+
+    // If we have a recovered account on record, refresh on-chain status so
+    // `selectedControlsA` (which gates the Prove step) reflects the just-selected
+    // account without the user having to click Refresh. Fire-and-forget.
+    if (this.accountA) {
+      this.refreshStatus().catch(() => {})
+    }
   }
 
   /**
@@ -838,8 +855,9 @@ export class RecoveryController extends EventEmitter {
    */
   async refreshStatus(): Promise<void> {
     const A = this.accountA
-    if (!A || !this.newOwner) {
+    if (!A) {
       this.newOwnerIsAuthorizedOnA = false
+      this.selectedControlsA = false
       this.emitUpdate()
       return
     }
@@ -849,8 +867,29 @@ export class RecoveryController extends EventEmitter {
       if (!provider) return
 
       const account = new Contract(A, AmbireAccount.abi, provider as any)
-      const priv: string = await account.privileges(getAddress(this.newOwner))
-      this.newOwnerIsAuthorizedOnA = BigInt(priv) !== 0n
+
+      // newOwner-input check (used by the "New owner authorized on A" status row).
+      if (this.newOwner) {
+        try {
+          const priv: string = await account.privileges(getAddress(this.newOwner))
+          this.newOwnerIsAuthorizedOnA = BigInt(priv) !== 0n
+        } catch {
+          this.newOwnerIsAuthorizedOnA = false
+        }
+      } else {
+        this.newOwnerIsAuthorizedOnA = false
+      }
+
+      // selected-account check (gates the Prove step): does the account the user is
+      // CURRENTLY using control A? After recovery the user selects B, which is != A.
+      const selected = this.#selectedAccount?.account?.addr
+      if (selected && getAddress(selected) !== getAddress(A)) {
+        const selPriv: string = await account.privileges(getAddress(selected))
+        this.selectedControlsA = BigInt(selPriv) !== 0n
+      } else {
+        this.selectedControlsA = false
+      }
+
       this.emitUpdate()
     } catch (error: any) {
       this.emitError({
@@ -875,7 +914,8 @@ export class RecoveryController extends EventEmitter {
       phase: this.phase,
       txHashes: this.txHashes,
       lastError: this.lastError,
-      newOwnerIsAuthorizedOnA: this.newOwnerIsAuthorizedOnA
+      newOwnerIsAuthorizedOnA: this.newOwnerIsAuthorizedOnA,
+      selectedControlsA: this.selectedControlsA
     }
   }
 }
