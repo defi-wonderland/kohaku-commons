@@ -11,7 +11,7 @@
 //   AMBIRE_EXECUTOR_ADAPTER ctor (address _ambireAccount)   // controller bound later via setController(address)
 //   ALWAYS_VALID_METHOD     ctor ()                          // no args
 
-import { AbiCoder, getCreate2Address, keccak256, toBeHex } from 'ethers'
+import { AbiCoder, getCreate2Address, Interface, keccak256, toBeHex } from 'ethers'
 
 export const RECOVERY_CONTROLLER = {
   abi: [{"type":"constructor","inputs":[{"name":"_target","type":"address","internalType":"contract IERC7579Account"},{"name":"_method","type":"address","internalType":"contract IRecoveryMethod"}],"stateMutability":"nonpayable"},{"type":"function","name":"ROTATE_OWNER_SELECTOR","inputs":[],"outputs":[{"name":"","type":"bytes4","internalType":"bytes4"}],"stateMutability":"view"},{"type":"function","name":"initiateRecovery","inputs":[{"name":"newOwner","type":"address","internalType":"address"},{"name":"proof","type":"bytes","internalType":"bytes"}],"outputs":[],"stateMutability":"nonpayable"},{"type":"function","name":"method","inputs":[],"outputs":[{"name":"","type":"address","internalType":"contract IRecoveryMethod"}],"stateMutability":"view"},{"type":"function","name":"pendingRecoveryHash","inputs":[{"name":"newOwner","type":"address","internalType":"address"}],"outputs":[{"name":"","type":"bytes32","internalType":"bytes32"}],"stateMutability":"view"},{"type":"function","name":"recoveryNonce","inputs":[{"name":"","type":"address","internalType":"address"}],"outputs":[{"name":"","type":"uint256","internalType":"uint256"}],"stateMutability":"view"},{"type":"function","name":"target","inputs":[],"outputs":[{"name":"","type":"address","internalType":"contract IERC7579Account"}],"stateMutability":"view"},{"type":"event","name":"RecoveryExecuted","inputs":[{"name":"target","type":"address","indexed":true,"internalType":"address"},{"name":"newOwner","type":"address","indexed":true,"internalType":"address"},{"name":"recoveryHash","type":"bytes32","indexed":false,"internalType":"bytes32"},{"name":"usedNonce","type":"uint256","indexed":false,"internalType":"uint256"}],"anonymous":false},{"type":"error","name":"MethodRejected","inputs":[]},{"type":"error","name":"ZeroAddress","inputs":[]}] as const,
@@ -81,4 +81,33 @@ export function buildInitCode(
  */
 export function predictCreate2(initCode: `0x${string}`, salt: string = DEPLOY_SALT): string {
   return getCreate2Address(SINGLETON, salt, keccak256(initCode))
+}
+
+const SINGLETON_IFACE = new Interface([
+  'function deploy(bytes _initCode, bytes32 _salt) returns (address payable)'
+])
+
+/**
+ * Build an EXPLICIT call to the SINGLETON's CREATE2 `deploy(initCode, salt)`.
+ *
+ * Use this instead of a `{ to: null }` call: `to: null` is only rewritten to the
+ * singleton by `toSingletonCall` on the deployed-smart-account execution path. On a
+ * 7702-delegated EOA (or any path that doesn't run that rewrite) a `to: null` call
+ * becomes a plain EOA `CREATE`, deploying to a NONCE-derived address instead of the
+ * deterministic CREATE2 address our wiring predicts. Calling the singleton explicitly
+ * makes the deploy CREATE2 on EVERY account type, so the contract lands exactly at
+ * `predictCreate2(initCode)`.
+ *
+ * @param initCode  Full init code (creation bytecode + encoded ctor args).
+ * @param salt      CREATE2 salt. Defaults to {@link DEPLOY_SALT}.
+ * @returns         `{ to: SINGLETON, data }` ready to drop into an account-op call.
+ */
+export function buildSingletonDeployCall(
+  initCode: `0x${string}`,
+  salt: string = DEPLOY_SALT
+): { to: string; data: string } {
+  return {
+    to: SINGLETON,
+    data: SINGLETON_IFACE.encodeFunctionData('deploy', [initCode, salt])
+  }
 }

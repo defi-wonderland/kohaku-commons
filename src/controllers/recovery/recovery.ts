@@ -31,6 +31,7 @@ import { StorageController } from '../storage/storage'
 import {
   ALWAYS_VALID_METHOD,
   AMBIRE_EXECUTOR_ADAPTER,
+  buildSingletonDeployCall,
   RECOVERY_CONTROLLER
 } from './recoveryArtifacts'
 
@@ -550,13 +551,16 @@ export class RecoveryController extends EventEmitter {
     this.adapterAddr = adapterAddr
     this.controllerAddr = controllerAddr
 
-    // Deploy via CREATE2 singleton (to: null is routed by toSingletonCall). Wiring +
-    // authorization happen in installRecovery() as a SECOND op (gas — see RecoveryPhase).
-    // IDEMPOTENT: skip any contract already on-chain. Addresses are deterministic
-    // (CREATE2), so a partially-completed prior attempt (e.g. method+adapter landed but
-    // the controller deploy ran out of gas) is repaired by re-running — only the missing
-    // contract(s) are (re)deployed, and they land at the SAME reserved addresses the
-    // adapter already references.
+    // Deploy via EXPLICIT calls to the CREATE2 SINGLETON — `buildSingletonDeployCall`
+    // builds `{ to: SINGLETON, data: deploy(initCode, salt) }`. We do NOT use `to: null`
+    // (auto-routed only on the deployed-smart-account path); on a 7702-delegated EOA a
+    // `to: null` call becomes a plain EOA CREATE → wrong (nonce-derived) address. Calling
+    // the singleton explicitly forces CREATE2 on EVERY account type, so each contract
+    // lands at exactly its predicted address.
+    // IDEMPOTENT: skip any contract already on-chain (addresses are deterministic), so a
+    // partial prior attempt (e.g. method+adapter landed, controller missing) is repaired
+    // by re-running — only the missing contract(s) deploy, to the SAME reserved addresses
+    // the adapter already references.
     const provider = this.#providers.providers[this.chainId.toString()]
     const isDeployed = async (addr: string): Promise<boolean> => {
       if (!provider) return false
@@ -569,12 +573,18 @@ export class RecoveryController extends EventEmitter {
     }
 
     const calls: Call[] = []
-    if (!(await isDeployed(methodAddr)))
-      calls.push({ to: null as unknown as string, value: 0n, data: methodInit })
-    if (!(await isDeployed(adapterAddr)))
-      calls.push({ to: null as unknown as string, value: 0n, data: adapterInit })
-    if (!(await isDeployed(controllerAddr)))
-      calls.push({ to: null as unknown as string, value: 0n, data: controllerInit })
+    if (!(await isDeployed(methodAddr))) {
+      const d = buildSingletonDeployCall(methodInit as `0x${string}`)
+      calls.push({ to: d.to, value: 0n, data: d.data })
+    }
+    if (!(await isDeployed(adapterAddr))) {
+      const d = buildSingletonDeployCall(adapterInit as `0x${string}`)
+      calls.push({ to: d.to, value: 0n, data: d.data })
+    }
+    if (!(await isDeployed(controllerAddr))) {
+      const d = buildSingletonDeployCall(controllerInit as `0x${string}`)
+      calls.push({ to: d.to, value: 0n, data: d.data })
+    }
 
     if (calls.length === 0) {
       // All three already on-chain — nothing to deploy; move straight to install.
