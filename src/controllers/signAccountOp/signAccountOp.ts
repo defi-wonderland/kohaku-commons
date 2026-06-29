@@ -348,9 +348,20 @@ export class SignAccountOpController extends EventEmitter {
     }
 
     if (
-      this.accountOp.calls.some(
-        (c) => isAddress(c.to) && getAddress(c.to) === getAddress(this.accountOp.accountAddr)
-      )
+      this.accountOp.calls.some((c) => {
+        if (!isAddress(c.to) || getAddress(c.to) !== getAddress(this.accountOp.accountAddr))
+          return false
+        // Exempt the legitimate self-call used to grant a privilege on one's own
+        // account — `setAddrPrivilege(address,bytes32)` (selector 0x0d5828d4). This is
+        // how Ambire itself authorizes the EntryPoint, and how the recovery kit installs
+        // its module/adapter (an owner authorizing a recovery executor on their account).
+        // The blanket CALL_TO_SELF rule otherwise flags this benign install as malicious.
+        const SET_ADDR_PRIVILEGE_SELECTOR = '0x0d5828d4'
+        const isSetPrivSelfCall =
+          typeof c.data === 'string' &&
+          c.data.toLowerCase().startsWith(SET_ADDR_PRIVILEGE_SELECTOR)
+        return !isSetPrivSelfCall
+      })
     )
       return {
         title: 'A malicious transaction found in this batch.',
