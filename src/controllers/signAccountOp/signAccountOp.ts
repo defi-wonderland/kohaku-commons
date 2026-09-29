@@ -150,6 +150,24 @@ export const noStateUpdateStatuses = [
   SigningStatus.WaitingForPaymaster
 ]
 
+// The account grants privileges on itself through a call to itself, which the contract
+// accepts only from the account (this is how the EntryPoint gets authorized too)
+const SET_ADDR_PRIVILEGE_SELECTOR = new Interface(AmbireAccount.abi).getFunction(
+  'setAddrPrivilege'
+)!.selector
+
+// A call to the account itself is refused as malicious, unless it grants a privilege
+export const isRefusedCallToSelf = (
+  call: AccountOp['calls'][number],
+  accountAddr: AccountOp['accountAddr']
+): boolean => {
+  if (!isAddress(call.to) || getAddress(call.to) !== getAddress(accountAddr)) return false
+
+  return !(
+    typeof call.data === 'string' && call.data.toLowerCase().startsWith(SET_ADDR_PRIVILEGE_SELECTOR)
+  )
+}
+
 export type SignAccountOpUpdateProps = {
   gasPrices?: GasRecommendation[] | null
   feeToken?: TokenResult
@@ -347,11 +365,7 @@ export class SignAccountOpController extends EventEmitter {
       return { title: invalidAccountOpError, code: 'NO_CALLS' }
     }
 
-    if (
-      this.accountOp.calls.some(
-        (c) => isAddress(c.to) && getAddress(c.to) === getAddress(this.accountOp.accountAddr)
-      )
-    )
+    if (this.accountOp.calls.some((c) => isRefusedCallToSelf(c, this.accountOp.accountAddr)))
       return {
         title: 'A malicious transaction found in this batch.',
         code: 'CALL_TO_SELF'
