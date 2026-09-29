@@ -31,7 +31,9 @@ import { AccountPickerController, DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from './acco
 const windowManager = mockWindowManager().windowManager
 
 const providers = Object.fromEntries(
-  networks.map((network) => [network.chainId, getRpcProvider(network)])
+  networks
+    .filter((network) => network.rpcUrls.length)
+    .map((network) => [network.chainId, getRpcProvider(network)])
 )
 
 const key1to11BasicAccPublicAddresses = Array.from(
@@ -312,6 +314,46 @@ describe('AccountPicker', () => {
         index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
         slot: 1
       })
+  })
+
+  test('should select the smart account of the next slot beside its basic account on a newly created seed', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    const keyIterator = new KeyIterator(seed)
+    accountPicker.setInitParams({
+      keyIterator,
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: true
+    })
+    await accountPicker.init()
+    await accountPicker.selectNextAccount()
+
+    const basicAccAddr = new Wallet(
+      getPrivateKeyFromSeed(seed, null, 0, BIP44_STANDARD_DERIVATION_TEMPLATE)
+    ).address
+    const smartAccKeyAddr = new Wallet(
+      getPrivateKeyFromSeed(
+        seed,
+        null,
+        SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+        BIP44_STANDARD_DERIVATION_TEMPLATE
+      )
+    ).address
+
+    const selectedSmartAccounts = accountPicker.selectedAccounts.filter((a) =>
+      isSmartAccount(a.account)
+    )
+    expect(selectedSmartAccounts).toHaveLength(1)
+    expect(selectedSmartAccounts[0].accountKeys).toEqual([
+      { addr: smartAccKeyAddr, index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET, slot: 1 }
+    ])
+    expect(
+      accountPicker.selectedAccounts
+        .filter((a) => !isSmartAccount(a.account))
+        .map((a) => a.account.addr)
+    ).toEqual([basicAccAddr])
   })
 
   DERIVATION_OPTIONS.forEach(({ label, value }) => {
