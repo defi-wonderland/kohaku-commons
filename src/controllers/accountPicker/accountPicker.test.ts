@@ -356,6 +356,28 @@ describe('AccountPicker', () => {
     ).toEqual([basicAccAddr])
   })
 
+  test('should select only the basic account of the next slot when importing a seed', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    const keyIterator = new KeyIterator(seed)
+    accountPicker.setInitParams({
+      keyIterator,
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: false
+    })
+    await accountPicker.init()
+    await accountPicker.selectNextAccount()
+
+    const basicAccAddr = new Wallet(
+      getPrivateKeyFromSeed(seed, null, 0, BIP44_STANDARD_DERIVATION_TEMPLATE)
+    ).address
+
+    expect(accountPicker.selectedAccounts.filter((a) => isSmartAccount(a.account))).toHaveLength(0)
+    expect(accountPicker.selectedAccounts.map((a) => a.account.addr)).toEqual([basicAccAddr])
+  })
+
   DERIVATION_OPTIONS.forEach(({ label, value }) => {
     test(`should derive correctly ${label}`, async () => {
       const keyIterator = new KeyIterator(process.env.SEED)
