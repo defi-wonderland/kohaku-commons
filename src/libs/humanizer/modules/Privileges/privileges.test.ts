@@ -95,4 +95,63 @@ describe('privileges', () => {
       }
     )
   })
+
+  test('a grant to another address is shown as a danger', () => {
+    const [entryPointGrant, strangerGrant, revoke] = privilegeHumanizer(
+      accountOp,
+      transactions.privileges,
+      humanizerInfo as HumanizerMeta
+    )
+
+    expect(strangerGrant.fullVisualization?.[0]).toMatchObject({
+      type: 'action',
+      warning: true
+    })
+    expect(strangerGrant.warnings).toEqual([
+      {
+        content:
+          'This transaction grants control of this account to 0x6969174FD72466430a46e18234D0b530c9FD5f49!',
+        level: 'danger'
+      }
+    ])
+    expect(entryPointGrant.warnings).toBeUndefined()
+    expect(entryPointGrant.fullVisualization?.[0]).not.toMatchObject({ warning: true })
+    expect(revoke.warnings).toBeUndefined()
+    expect(revoke.fullVisualization?.[0]).not.toMatchObject({ warning: true })
+  })
+
+  test('the entry point marker granted to another address is shown as a danger', () => {
+    const [markerToStranger] = privilegeHumanizer(
+      accountOp,
+      [
+        {
+          to: accountOp.accountAddr,
+          value: 0n,
+          data: '0x0d5828d40000000000000000000000006969174FD72466430a46e18234D0b530c9FD5f490000000000000000000000000000000000000000000000000000000000007171'
+        }
+      ],
+      humanizerInfo as HumanizerMeta
+    )
+
+    expect(markerToStranger.warnings).toMatchObject([{ level: 'danger' }])
+  })
+
+  test('a grant is recognised whatever the data casing', () => {
+    const [upperCaseGrant] = privilegeHumanizer(
+      accountOp,
+      [
+        {
+          ...transactions.privileges[1],
+          data: `0x${transactions.privileges[1].data.slice(2).toUpperCase()}`
+        }
+      ],
+      humanizerInfo as HumanizerMeta
+    )
+
+    expect(upperCaseGrant.fullVisualization?.[0]).toMatchObject({
+      type: 'action',
+      content: 'Update access status'
+    })
+    expect(upperCaseGrant.warnings).toMatchObject([{ level: 'danger' }])
+  })
 })

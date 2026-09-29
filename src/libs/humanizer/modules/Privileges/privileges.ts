@@ -1,36 +1,44 @@
-import { Interface, ZeroHash } from 'ethers'
+import { getAddress, Interface, ZeroHash } from 'ethers'
 
 import AmbireAccount from '../../../../../contracts/compiled/AmbireAccount.json'
 import { ENTRY_POINT_MARKER } from '../../../../consts/deploy'
 import { AccountOp } from '../../../accountOp/accountOp'
-import {
-  HumanizerCallModule,
-  HumanizerMeta,
-  HumanizerVisualization,
-  IrCall
-} from '../../interfaces'
-import { getAction, getAddressVisualization, getKnownName, getLabel } from '../../utils'
+import { HumanizerCallModule, HumanizerMeta, IrCall } from '../../interfaces'
+import { getAction, getAddressVisualization, getKnownName, getLabel, getWarning } from '../../utils'
 
 const iface = new Interface(AmbireAccount.abi)
+const SET_ADDR_PRIVILEGE_SELECTOR = iface.getFunction('setAddrPrivilege')!.selector
 
+// Any grant other than the entry point's lets the granted address act as this account,
+// so it is shown as a danger
 const parsePrivilegeCall = (
   humanizerMeta: HumanizerMeta,
   call: IrCall
-): HumanizerVisualization[] => {
+): Pick<IrCall, 'fullVisualization' | 'warnings'> => {
   const { addr, priv } = iface.parseTransaction(call)!.args
   if (getKnownName(humanizerMeta, addr)?.includes('entry point') && priv === ENTRY_POINT_MARKER)
-    return [getAction('Enable'), getAddressVisualization(addr)]
+    return { fullVisualization: [getAction('Enable'), getAddressVisualization(addr)] }
   if (priv === ZeroHash)
-    return [getAction('Revoke access'), getLabel('of'), getAddressVisualization(addr)]
-  return [
-    getAction('Update access status'),
-    getLabel('of'),
-    getAddressVisualization(addr),
-    getLabel('to'),
-    priv === '0x0000000000000000000000000000000000000000000000000000000000000001'
-      ? getLabel('regular access')
-      : getLabel(priv)
-  ]
+    return {
+      fullVisualization: [getAction('Revoke access'), getLabel('of'), getAddressVisualization(addr)]
+    }
+  return {
+    fullVisualization: [
+      getAction('Update access status', { warning: true }),
+      getLabel('of'),
+      getAddressVisualization(addr),
+      getLabel('to'),
+      priv === '0x0000000000000000000000000000000000000000000000000000000000000001'
+        ? getLabel('regular access')
+        : getLabel(priv)
+    ],
+    warnings: [
+      getWarning(
+        `This transaction grants control of this account to ${getAddress(addr)}!`,
+        'danger'
+      )
+    ]
+  }
 }
 
 export const privilegeHumanizer: HumanizerCallModule = (
@@ -39,10 +47,10 @@ export const privilegeHumanizer: HumanizerCallModule = (
   humanizerMeta: HumanizerMeta
 ) => {
   const newCalls = irCalls.map((call) => {
-    if (call.data.slice(0, 10) === iface.getFunction('setAddrPrivilege')?.selector) {
+    if (call.data.slice(0, 10).toLowerCase() === SET_ADDR_PRIVILEGE_SELECTOR) {
       return {
         ...call,
-        fullVisualization: parsePrivilegeCall(humanizerMeta, call)
+        ...parsePrivilegeCall(humanizerMeta, call)
       }
     }
     return call
