@@ -1,4 +1,4 @@
-import { getAddress, Interface, ZeroHash } from 'ethers'
+import { AbiCoder, getAddress, id, Interface, keccak256, ZeroHash } from 'ethers'
 
 import AmbireAccount from '../../../../../contracts/compiled/AmbireAccount.json'
 import { ENTRY_POINT_MARKER } from '../../../../consts/deploy'
@@ -8,6 +8,48 @@ import { getAction, getAddressVisualization, getKnownName, getLabel, getWarning 
 
 const iface = new Interface(AmbireAccount.abi)
 const SET_ADDR_PRIVILEGE_SELECTOR = iface.getFunction('setAddrPrivilege')!.selector
+// The recovery kit manager's commitSetup(bytes32,uint256,bytes,bytes)
+const COMMIT_SETUP_SELECTOR = id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)
+const abiCoder = AbiCoder.defaultAbiCoder()
+
+const isCallTo = (call: Pick<IrCall, 'to'>, addr: string): boolean =>
+  !!call.to && call.to.toLowerCase() === addr.toLowerCase()
+
+// The recovery kit grants each audited action a privilege on the account through a call the
+// account makes to itself: setAddrPrivilege(slot, value), where the slot is the address taken
+// from keccak256(abi.encode("kit", action)) and the value is keccak256(abi.encode(action, "")).
+// That exact call is trusted only when the same batch commits the kit's setup on its manager.
+export const isRecoveryKitGrant = (
+  accountOp: Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'>,
+  call: Pick<IrCall, 'to' | 'data'>
+): boolean => {
+  const recoveryKit = accountOp.meta?.recoveryKit
+  if (!recoveryKit || !isCallTo(call, accountOp.accountAddr)) return false
+  if (!call.data || call.data.slice(0, 10).toLowerCase() !== SET_ADDR_PRIVILEGE_SELECTOR)
+    return false
+  const commitsSetup = accountOp.calls.some(
+    (c) =>
+      isCallTo(c, recoveryKit.manager) &&
+      !!c.data &&
+      c.data.slice(0, 10).toLowerCase() === COMMIT_SETUP_SELECTOR
+  )
+  if (!commitsSetup) return false
+
+  let addr: string
+  let priv: string
+  try {
+    ;[addr, priv] = iface.decodeFunctionData('setAddrPrivilege', call.data)
+  } catch {
+    return false
+  }
+  return recoveryKit.auditedActions.some((action) => {
+    const slot = getAddress(
+      `0x${keccak256(abiCoder.encode(['string', 'address'], ['kit', action])).slice(-40)}`
+    )
+    const value = keccak256(abiCoder.encode(['address', 'string'], [action, '']))
+    return getAddress(addr) === slot && priv.toLowerCase() === value
+  })
+}
 
 // Any grant other than the entry point's lets the granted address act as the called account,
 // so it is shown as a danger. The call may target another account than the one signing,
@@ -54,6 +96,7 @@ export const privilegeHumanizer: HumanizerCallModule = (
   humanizerMeta: HumanizerMeta
 ) => {
   const newCalls = irCalls.map((call) => {
+    if (isRecoveryKitGrant(accountOp, call)) return call
     if (call.data.slice(0, 10).toLowerCase() === SET_ADDR_PRIVILEGE_SELECTOR) {
       return {
         ...call,

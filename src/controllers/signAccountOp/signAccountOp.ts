@@ -63,6 +63,7 @@ import {
   GasRecommendation
 } from '../../libs/gasPrice/gasPrice'
 import { humanizeAccountOp } from '../../libs/humanizer'
+import { isRecoveryKitGrant } from '../../libs/humanizer/modules/Privileges/privileges'
 import { hasRelayerSupport } from '../../libs/networks/networks'
 import { AbstractPaymaster } from '../../libs/paymaster/abstractPaymaster'
 import { GetOptions, TokenResult } from '../../libs/portfolio'
@@ -150,22 +151,15 @@ export const noStateUpdateStatuses = [
   SigningStatus.WaitingForPaymaster
 ]
 
-// The account grants privileges on itself through a call to itself, which the contract
-// accepts only from the account (this is how the EntryPoint gets authorized too)
-const SET_ADDR_PRIVILEGE_SELECTOR = new Interface(AmbireAccount.abi).getFunction(
-  'setAddrPrivilege'
-)!.selector
-
-// A call to the account itself is refused as malicious, unless it grants a privilege
+// A call to the account itself is refused as malicious, unless it is the recovery kit's
+// grant of a privilege to one of its audited actions
 export const isRefusedCallToSelf = (
   call: AccountOp['calls'][number],
-  accountAddr: AccountOp['accountAddr']
+  accountOp: Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'>
 ): boolean => {
-  if (!isAddress(call.to) || getAddress(call.to) !== getAddress(accountAddr)) return false
+  if (!isAddress(call.to) || getAddress(call.to) !== getAddress(accountOp.accountAddr)) return false
 
-  return !(
-    typeof call.data === 'string' && call.data.toLowerCase().startsWith(SET_ADDR_PRIVILEGE_SELECTOR)
-  )
+  return !isRecoveryKitGrant(accountOp, call)
 }
 
 export type SignAccountOpUpdateProps = {
@@ -365,7 +359,7 @@ export class SignAccountOpController extends EventEmitter {
       return { title: invalidAccountOpError, code: 'NO_CALLS' }
     }
 
-    if (this.accountOp.calls.some((c) => isRefusedCallToSelf(c, this.accountOp.accountAddr)))
+    if (this.accountOp.calls.some((c) => isRefusedCallToSelf(c, this.accountOp)))
       return {
         title: 'A malicious transaction found in this batch.',
         code: 'CALL_TO_SELF'

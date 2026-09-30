@@ -1,5 +1,8 @@
+import { AbiCoder, getAddress, id, Interface, keccak256 } from 'ethers'
+
 import { expect } from '@jest/globals'
 
+import AmbireAccount from '../../../../../contracts/compiled/AmbireAccount.json'
 import humanizerInfo from '../../../../consts/humanizer/humanizerInfo.json'
 import { AccountOp } from '../../../accountOp/accountOp'
 import { Call } from '../../../accountOp/types'
@@ -171,6 +174,51 @@ describe('privileges', () => {
         level: 'danger'
       }
     ])
+  })
+
+  test('the recovery kit grant to an audited action is shown without a danger', () => {
+    const abiCoder = AbiCoder.defaultAbiCoder()
+    const manager = '0x1111111111111111111111111111111111111111'
+    const action = '0x2222222222222222222222222222222222222222'
+    const slot = getAddress(
+      `0x${keccak256(abiCoder.encode(['string', 'address'], ['kit', action])).slice(-40)}`
+    )
+    const kitGrant: Call = {
+      to: accountOp.accountAddr,
+      value: 0n,
+      data: new Interface(AmbireAccount.abi).encodeFunctionData('setAddrPrivilege', [
+        slot,
+        keccak256(abiCoder.encode(['address', 'string'], [action, '']))
+      ])
+    }
+    const commitSetup: Call = {
+      to: manager,
+      value: 0n,
+      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+    }
+    const calls = [commitSetup, kitGrant]
+    const withKit = {
+      ...accountOp,
+      calls,
+      meta: { recoveryKit: { manager, auditedActions: [action] } }
+    }
+
+    const [, allowedGrant] = privilegeHumanizer(withKit, calls, humanizerInfo as HumanizerMeta)
+    expect(allowedGrant.warnings).toBeUndefined()
+
+    const [, grantWithoutKit] = privilegeHumanizer(
+      { ...accountOp, calls },
+      calls,
+      humanizerInfo as HumanizerMeta
+    )
+    expect(grantWithoutKit.warnings).toMatchObject([{ level: 'danger' }])
+
+    const [grantWithoutCommit] = privilegeHumanizer(
+      { ...withKit, calls: [kitGrant] },
+      [kitGrant],
+      humanizerInfo as HumanizerMeta
+    )
+    expect(grantWithoutCommit.warnings).toMatchObject([{ level: 'danger' }])
   })
 
   test('a grant on another account names that account', () => {

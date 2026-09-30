@@ -78,6 +78,8 @@ export interface AccountOp {
     setDelegation?: boolean
     /** Used to determine if the account op is up-to-date with the latest quote */
     fromQuoteId?: string
+    /** The recovery kit whose audited actions this op may grant a privilege on the account */
+    recoveryKit?: { manager: string; auditedActions: string[] }
   }
   flags?: {
     hideActivityBanner?: boolean
