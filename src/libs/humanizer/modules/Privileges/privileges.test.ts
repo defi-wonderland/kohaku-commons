@@ -3,11 +3,12 @@ import { AbiCoder, getAddress, id, Interface, keccak256 } from 'ethers'
 import { expect } from '@jest/globals'
 
 import AmbireAccount from '../../../../../contracts/compiled/AmbireAccount.json'
+import { ENTRY_POINT_MARKER } from '../../../../consts/deploy'
 import humanizerInfo from '../../../../consts/humanizer/humanizerInfo.json'
 import { AccountOp } from '../../../accountOp/accountOp'
 import { Call } from '../../../accountOp/types'
 import { HumanizerMeta, HumanizerVisualization, IrCall } from '../../interfaces'
-import { privilegeHumanizer } from './privileges'
+import { isRecoveryKitGrant, privilegeHumanizer } from './privileges'
 
 const transactions: { [key: string]: Call[] } = {
   privileges: [
@@ -219,6 +220,127 @@ describe('privileges', () => {
       humanizerInfo as HumanizerMeta
     )
     expect(grantWithoutCommit.warnings).toMatchObject([{ level: 'danger' }])
+  })
+
+  describe('the recovery kit grant', () => {
+    const abiCoder = AbiCoder.defaultAbiCoder()
+    const ambireAccount = new Interface(AmbireAccount.abi)
+    const manager = '0x5ff137D4b0FDCD49DcA30c7CF57E578a026d2789'
+    const auditedAction = '0x2222222222222222222222222222222222222222'
+    const unlistedAction = '0x3333333333333333333333333333333333333333'
+    const kitSlot = (action: string) =>
+      getAddress(
+        `0x${keccak256(abiCoder.encode(['string', 'address'], ['kit', action])).slice(-40)}`
+      )
+    const kitValue = (action: string) =>
+      keccak256(abiCoder.encode(['address', 'string'], [action, '']))
+    const grant = (slot: string, value: string, to = accountOp.accountAddr): Call => ({
+      to,
+      value: 0n,
+      data: ambireAccount.encodeFunctionData('setAddrPrivilege', [slot, value])
+    })
+    const kitGrant = grant(kitSlot(auditedAction), kitValue(auditedAction))
+    const commitSetup: Call = {
+      to: manager,
+      value: 0n,
+      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+    }
+    const humanize = (calls: Call[], recoveryKit = { manager, auditedActions: [auditedAction] }) =>
+      privilegeHumanizer(
+        { ...accountOp, calls, meta: { recoveryKit } },
+        calls,
+        humanizerInfo as HumanizerMeta
+      )
+
+    test('is shown without a danger whether it comes before or after the commitSetup', () => {
+      const [grantFirst] = humanize([kitGrant, commitSetup])
+      expect(grantFirst.warnings).toBeUndefined()
+      const [, grantSecond] = humanize([commitSetup, kitGrant])
+      expect(grantSecond.warnings).toBeUndefined()
+    })
+
+    test('matches the manager whatever its casing', () => {
+      const [, lowerCaseCommit] = humanize([
+        { ...commitSetup, to: manager.toLowerCase() },
+        kitGrant
+      ])
+      expect(lowerCaseCommit.warnings).toBeUndefined()
+      const [, lowerCaseManager] = humanize([commitSetup, kitGrant], {
+        manager: manager.toLowerCase(),
+        auditedActions: [auditedAction]
+      })
+      expect(lowerCaseManager.warnings).toBeUndefined()
+    })
+
+    test('with commitSetup sent to another address than the manager is shown as a danger', () => {
+      const [, misdirected] = humanize([
+        { ...commitSetup, to: '0x1111111111111111111111111111111111111111' },
+        kitGrant
+      ])
+      expect(misdirected.warnings).toMatchObject([{ level: 'danger' }])
+    })
+
+    test('to an action that is not audited is shown as a danger', () => {
+      const unlistedGrant = grant(kitSlot(unlistedAction), kitValue(unlistedAction))
+      const [, shown] = humanize([commitSetup, unlistedGrant])
+      expect(shown.warnings).toMatchObject([{ level: 'danger' }])
+    })
+
+    test('with the slot of an audited action and another value is shown as a danger', () => {
+      const wrongValues = [
+        kitValue(unlistedAction),
+        abiCoder.encode(['uint256'], [1]),
+        ENTRY_POINT_MARKER
+      ]
+      wrongValues.forEach((value) => {
+        const [, shown] = humanize([commitSetup, grant(kitSlot(auditedAction), value)])
+        expect(shown.warnings).toMatchObject([{ level: 'danger' }])
+      })
+    })
+
+    test('sent to another account is shown as a danger naming that account', () => {
+      const otherAccount = '0x77777777789A8BBEE6C64381e5E89E501fb0e4c8'
+      const [, shown] = humanize([
+        commitSetup,
+        grant(kitSlot(auditedAction), kitValue(auditedAction), otherAccount)
+      ])
+      expect(shown.warnings).toMatchObject([
+        { level: 'danger', content: expect.stringContaining(otherAccount) }
+      ])
+    })
+
+    test('is not recognised in another function on the account', () => {
+      const executeBySelf: Call = {
+        to: accountOp.accountAddr,
+        value: 0n,
+        data: ambireAccount.encodeFunctionData('executeBySelf', [
+          [[accountOp.accountAddr, 0n, kitGrant.data]]
+        ])
+      }
+      const calls = [commitSetup, executeBySelf]
+      expect(
+        isRecoveryKitGrant(
+          {
+            ...accountOp,
+            calls,
+            meta: { recoveryKit: { manager, auditedActions: [auditedAction] } }
+          },
+          executeBySelf
+        )
+      ).toBe(false)
+    })
+
+    test('is not recognised when the op carries no recovery kit', () => {
+      const calls = [commitSetup, kitGrant]
+      expect(isRecoveryKitGrant({ ...accountOp, calls }, kitGrant)).toBe(false)
+      expect(isRecoveryKitGrant({ ...accountOp, calls, meta: {} }, kitGrant)).toBe(false)
+      expect(
+        isRecoveryKitGrant(
+          { ...accountOp, calls, meta: { recoveryKit: { manager, auditedActions: [] } } },
+          kitGrant
+        )
+      ).toBe(false)
+    })
   })
 
   test('a grant on another account names that account', () => {

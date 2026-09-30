@@ -56,6 +56,90 @@ describe('Calls to the account itself', () => {
     ).toBe(false)
   })
 
+  test('the kit grant is allowed whether it comes before or after the commitSetup', () => {
+    expect(isRefusedCallToSelf(kitGrant, opWith([kitGrant, commitSetup]))).toBe(false)
+    expect(isRefusedCallToSelf(kitGrant, opWith([commitSetup, kitGrant]))).toBe(false)
+  })
+
+  test('the manager is matched whatever its casing', () => {
+    const checksummedManager = '0x5ff137D4b0FDCD49DcA30c7CF57E578a026d2789'
+    const lowerCaseCommit = { ...commitSetup, to: checksummedManager.toLowerCase() }
+    expect(
+      isRefusedCallToSelf(
+        kitGrant,
+        opWith([lowerCaseCommit, kitGrant], {
+          recoveryKit: { ...recoveryKit, manager: checksummedManager }
+        })
+      )
+    ).toBe(false)
+    expect(
+      isRefusedCallToSelf(
+        kitGrant,
+        opWith([{ ...commitSetup, to: checksummedManager }, kitGrant], {
+          recoveryKit: { ...recoveryKit, manager: checksummedManager.toLowerCase() }
+        })
+      )
+    ).toBe(false)
+  })
+
+  test('the audited action is matched whatever its casing', () => {
+    const checksummedAction = '0x6969174FD72466430a46e18234D0b530c9FD5f49'
+    const grant = {
+      to: accountAddr,
+      value: 0n,
+      data: grantData(kitSlot(checksummedAction), kitValue(checksummedAction))
+    }
+    expect(
+      isRefusedCallToSelf(
+        grant,
+        opWith([commitSetup, grant], {
+          recoveryKit: { manager, auditedActions: [checksummedAction.toLowerCase()] }
+        })
+      )
+    ).toBe(false)
+  })
+
+  test('the kit grant beside another call to the manager than commitSetup is refused', () => {
+    const otherManagerCall = {
+      to: manager,
+      value: 0n,
+      data: `${id('commitSetup(bytes32,uint256,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+    }
+    expect(isRefusedCallToSelf(kitGrant, opWith([otherManagerCall, kitGrant]))).toBe(true)
+  })
+
+  test('the kit grant to an audited action is allowed among several audited actions', () => {
+    const grant = {
+      to: accountAddr,
+      value: 0n,
+      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction))
+    }
+    expect(
+      isRefusedCallToSelf(
+        grant,
+        opWith([commitSetup, grant], {
+          recoveryKit: { manager, auditedActions: [auditedAction, unlistedAction] }
+        })
+      )
+    ).toBe(false)
+  })
+
+  test('the kit slot of one audited action with the value of another is refused', () => {
+    const grant = {
+      to: accountAddr,
+      value: 0n,
+      data: grantData(kitSlot(auditedAction), kitValue(unlistedAction))
+    }
+    expect(
+      isRefusedCallToSelf(
+        grant,
+        opWith([commitSetup, grant], {
+          recoveryKit: { manager, auditedActions: [auditedAction, unlistedAction] }
+        })
+      )
+    ).toBe(true)
+  })
+
   test('the kit grant without commitSetup in the batch is refused', () => {
     expect(isRefusedCallToSelf(kitGrant, opWith([kitGrant]))).toBe(true)
   })
