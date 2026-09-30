@@ -9,9 +9,11 @@ import { getAction, getAddressVisualization, getKnownName, getLabel, getWarning 
 const iface = new Interface(AmbireAccount.abi)
 const SET_ADDR_PRIVILEGE_SELECTOR = iface.getFunction('setAddrPrivilege')!.selector
 
-// Any grant other than the entry point's lets the granted address act as this account,
-// so it is shown as a danger
+// Any grant other than the entry point's lets the granted address act as the called account,
+// so it is shown as a danger. The call may target another account than the one signing,
+// in which case the warning names that account. Warnings earlier modules attached are kept.
 const parsePrivilegeCall = (
+  accountOp: AccountOp,
   humanizerMeta: HumanizerMeta,
   call: IrCall
 ): Pick<IrCall, 'fullVisualization' | 'warnings'> => {
@@ -33,8 +35,13 @@ const parsePrivilegeCall = (
         : getLabel(priv)
     ],
     warnings: [
+      ...(call.warnings || []),
       getWarning(
-        `This transaction grants control of this account to ${getAddress(addr)}!`,
+        `This transaction grants control of ${
+          !call.to || call.to.toLowerCase() === accountOp.accountAddr.toLowerCase()
+            ? 'this account'
+            : `the account ${getAddress(call.to)}`
+        } to ${getAddress(addr)}!`,
         'danger'
       )
     ]
@@ -50,7 +57,7 @@ export const privilegeHumanizer: HumanizerCallModule = (
     if (call.data.slice(0, 10).toLowerCase() === SET_ADDR_PRIVILEGE_SELECTOR) {
       return {
         ...call,
-        ...parsePrivilegeCall(humanizerMeta, call)
+        ...parsePrivilegeCall(accountOp, humanizerMeta, call)
       }
     }
     return call

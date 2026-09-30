@@ -154,4 +154,44 @@ describe('privileges', () => {
     })
     expect(upperCaseGrant.warnings).toMatchObject([{ level: 'danger' }])
   })
+
+  test('a grant keeps the warnings the call already carries', () => {
+    const earlierWarning = { content: 'An earlier warning', level: 'warning' as const }
+    const [grant] = privilegeHumanizer(
+      accountOp,
+      [{ ...transactions.privileges[1], warnings: [earlierWarning] }],
+      humanizerInfo as HumanizerMeta
+    )
+
+    expect(grant.warnings).toEqual([
+      earlierWarning,
+      {
+        content:
+          'This transaction grants control of this account to 0x6969174FD72466430a46e18234D0b530c9FD5f49!',
+        level: 'danger'
+      }
+    ])
+  })
+
+  test('a grant on another account names that account', () => {
+    const otherAccount = '0x77777777789A8BBEE6C64381e5E89E501fb0e4c8'
+    const [ownGrant, otherGrant] = privilegeHumanizer(
+      accountOp,
+      [
+        transactions.privileges[1],
+        { ...transactions.privileges[1], to: otherAccount.toLowerCase() }
+      ],
+      humanizerInfo as HumanizerMeta
+    )
+
+    expect(ownGrant.warnings?.[0]?.content).toBe(
+      'This transaction grants control of this account to 0x6969174FD72466430a46e18234D0b530c9FD5f49!'
+    )
+    expect(otherGrant.warnings).toEqual([
+      {
+        content: `This transaction grants control of the account ${otherAccount} to 0x6969174FD72466430a46e18234D0b530c9FD5f49!`,
+        level: 'danger'
+      }
+    ])
+  })
 })
