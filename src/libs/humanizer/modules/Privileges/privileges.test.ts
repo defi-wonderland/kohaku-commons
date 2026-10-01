@@ -252,6 +252,30 @@ describe('privileges', () => {
         humanizerInfo as HumanizerMeta
       )
 
+    test('is shown as the audited action it allows, with no warning', () => {
+      const [, shown] = humanize([commitSetup, kitGrant])
+      expect(shown.fullVisualization).toMatchObject([
+        { type: 'action', content: "Allow the recovery kit's audited action" },
+        { type: 'address', address: auditedAction }
+      ])
+      expect(shown.fullVisualization).not.toContainEqual(expect.objectContaining({ warning: true }))
+    })
+
+    test('keeps the warnings the call already carries', () => {
+      const earlierWarning = { content: 'An earlier warning', level: 'warning' as const }
+      const calls = [commitSetup, { ...kitGrant, warnings: [earlierWarning] }]
+      const [, shown] = privilegeHumanizer(
+        {
+          ...accountOp,
+          calls,
+          meta: { recoveryKit: { manager, auditedActions: [auditedAction] } }
+        },
+        calls,
+        humanizerInfo as HumanizerMeta
+      )
+      expect(shown.warnings).toEqual([earlierWarning])
+    })
+
     test('is shown without a danger whether it comes before or after the commitSetup', () => {
       const [grantFirst] = humanize([kitGrant, commitSetup])
       expect(grantFirst.warnings).toBeUndefined()
