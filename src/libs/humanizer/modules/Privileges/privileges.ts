@@ -111,7 +111,7 @@ export const privilegeHumanizer: HumanizerCallModule = (
       return {
         ...call,
         fullVisualization: [
-          getAction("Allow the recovery kit's audited action"),
+          getAction('Enable recovery module'),
           getAddressVisualization(recoveryKitAction)
         ]
       }

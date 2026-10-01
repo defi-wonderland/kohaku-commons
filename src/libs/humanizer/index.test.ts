@@ -379,7 +379,7 @@ describe('the recovery kit grant', () => {
       [kitGrant],
       [
         [
-          getAction("Allow the recovery kit's audited action"),
+          getAction('Enable recovery module'),
           getAddressVisualization(auditedAction),
           getToken(accountOp.accountAddr, 0n, true)
         ]

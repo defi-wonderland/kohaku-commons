@@ -252,10 +252,10 @@ describe('privileges', () => {
         humanizerInfo as HumanizerMeta
       )
 
-    test('is shown as the audited action it allows, with no warning', () => {
+    test('is shown as enabling the recovery module, with no warning', () => {
       const [, shown] = humanize([commitSetup, kitGrant])
       expect(shown.fullVisualization).toMatchObject([
-        { type: 'action', content: "Allow the recovery kit's audited action" },
+        { type: 'action', content: 'Enable recovery module' },
         { type: 'address', address: auditedAction }
       ])
       expect(shown.fullVisualization).not.toContainEqual(expect.objectContaining({ warning: true }))
