@@ -996,7 +996,9 @@ export class AccountPickerController extends EventEmitter {
               !isLinked &&
               isSmartAccount(account)
           )
-          if (smartAccountOnTheSameSlot) this.selectAccount(smartAccountOnTheSameSlot.account)
+          if (smartAccountOnTheSameSlot) {
+            this.selectAccount(smartAccountOnTheSameSlot.account)
+          }
         }
         break
       }
