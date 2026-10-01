@@ -58,6 +58,7 @@ export const DEFAULT_PAGE_SIZE = 1
 const DEFAULT_SHOULD_SEARCH_FOR_LINKED_ACCOUNTS = true
 const DEFAULT_SHOULD_GET_ACCOUNTS_USED_ON_NETWORKS = true
 const DEFAULT_SHOULD_ADD_NEXT_ACCOUNT_AUTOMATICALLY = true
+const DEFAULT_SHOULD_SELECT_SMART_ACCOUNT_AUTOMATICALLY = false
 
 /**
  * Account Picker Controller
@@ -87,6 +88,7 @@ export class AccountPickerController extends EventEmitter {
     shouldSearchForLinkedAccounts?: boolean
     shouldGetAccountsUsedOnNetworks?: boolean
     shouldAddNextAccountAutomatically?: boolean
+    shouldSelectSmartAccountAutomatically?: boolean
   } | null = null
 
   keyIterator?: KeyIterator | null
@@ -100,6 +102,10 @@ export class AccountPickerController extends EventEmitter {
   shouldGetAccountsUsedOnNetworks = DEFAULT_SHOULD_GET_ACCOUNTS_USED_ON_NETWORKS
 
   shouldAddNextAccountAutomatically = DEFAULT_SHOULD_ADD_NEXT_ACCOUNT_AUTOMATICALLY
+
+  // When set (a newly created seed), the next account selection also selects
+  // the smart account derived on the same slot, so both get added together.
+  shouldSelectSmartAccountAutomatically = DEFAULT_SHOULD_SELECT_SMART_ACCOUNT_AUTOMATICALLY
 
   /* This is only the index of the current page */
   page: number = DEFAULT_PAGE
@@ -401,6 +407,7 @@ export class AccountPickerController extends EventEmitter {
     shouldSearchForLinkedAccounts?: boolean
     shouldGetAccountsUsedOnNetworks?: boolean
     shouldAddNextAccountAutomatically?: boolean
+    shouldSelectSmartAccountAutomatically?: boolean
   }) {
     this.initParams = params
     this.emitUpdate()
@@ -416,7 +423,8 @@ export class AccountPickerController extends EventEmitter {
       pageSize,
       shouldSearchForLinkedAccounts = DEFAULT_SHOULD_SEARCH_FOR_LINKED_ACCOUNTS,
       shouldGetAccountsUsedOnNetworks = DEFAULT_SHOULD_GET_ACCOUNTS_USED_ON_NETWORKS,
-      shouldAddNextAccountAutomatically = DEFAULT_SHOULD_ADD_NEXT_ACCOUNT_AUTOMATICALLY
+      shouldAddNextAccountAutomatically = DEFAULT_SHOULD_ADD_NEXT_ACCOUNT_AUTOMATICALLY,
+      shouldSelectSmartAccountAutomatically = DEFAULT_SHOULD_SELECT_SMART_ACCOUNT_AUTOMATICALLY
     } = this.initParams
 
     await this.reset(false)
@@ -430,6 +438,7 @@ export class AccountPickerController extends EventEmitter {
     this.#alreadyImportedAccounts = [...this.#accounts.accounts]
     this.shouldSearchForLinkedAccounts = shouldSearchForLinkedAccounts
     this.shouldGetAccountsUsedOnNetworks = shouldGetAccountsUsedOnNetworks
+    this.shouldSelectSmartAccountAutomatically = shouldSelectSmartAccountAutomatically
     if (shouldAddNextAccountAutomatically) {
       await this.selectNextAccount()
       await this.addAccounts()
@@ -456,6 +465,7 @@ export class AccountPickerController extends EventEmitter {
     this.hdPathTemplate = undefined
     this.shouldSearchForLinkedAccounts = DEFAULT_SHOULD_SEARCH_FOR_LINKED_ACCOUNTS
     this.shouldGetAccountsUsedOnNetworks = DEFAULT_SHOULD_GET_ACCOUNTS_USED_ON_NETWORKS
+    this.shouldSelectSmartAccountAutomatically = DEFAULT_SHOULD_SELECT_SMART_ACCOUNT_AUTOMATICALLY
     this.pageError = null
 
     this.linkedAccountsLoading = false
@@ -945,9 +955,18 @@ export class AccountPickerController extends EventEmitter {
     this.selectNextAccountStatus = 'LOADING'
     await this.forceEmitUpdate()
 
-    let currentPage: number = this.page
     let nextAccount: AccountWithNetworkMeta | undefined
     const maxPages = 10000 // limit, acts as a safeguard to prevent infinite loops
+
+    // A page lists only one smart account, the lowest unused one, so the smart
+    // account of the picked basic account's slot is on the page only when the
+    // page holds that one slot. The search then pages one slot at a time,
+    // starting from the first slot of the current page.
+    const originalPage = this.page
+    const originalPageSize = this.pageSize
+    const pageSize = this.shouldSelectSmartAccountAutomatically ? 1 : originalPageSize
+    let currentPage: number =
+      pageSize === originalPageSize ? originalPage : (originalPage - 1) * originalPageSize + 1
 
     while (currentPage <= maxPages) {
       // TODO: Flag that excludes getting smart account key addresses
@@ -955,7 +974,7 @@ export class AccountPickerController extends EventEmitter {
       // eslint-disable-next-line no-await-in-loop
       await this.setPage({
         page: currentPage,
-        pageSize: this.pageSize,
+        pageSize,
         shouldGetAccountsUsedOnNetworks: false,
         shouldSearchForLinkedAccounts: false
       })
@@ -967,15 +986,29 @@ export class AccountPickerController extends EventEmitter {
         })
       }
 
-      nextAccount = this.accountsOnPage.find(
+      const nextAccountOnPage = this.accountsOnPage.find(
         ({ isLinked, account, importStatus }) =>
           importStatus !== ImportStatus.ImportedWithTheSameKeys &&
           !isLinked &&
           !isSmartAccount(account)
-      )?.account
+      )
+      nextAccount = nextAccountOnPage?.account
 
-      if (nextAccount) {
-        this.selectAccount(nextAccount)
+      if (nextAccountOnPage) {
+        this.selectAccount(nextAccountOnPage.account)
+
+        if (this.shouldSelectSmartAccountAutomatically) {
+          const smartAccountOnTheSameSlot = this.accountsOnPage.find(
+            ({ isLinked, account, importStatus, slot }) =>
+              slot === nextAccountOnPage.slot &&
+              importStatus !== ImportStatus.ImportedWithTheSameKeys &&
+              !isLinked &&
+              isSmartAccount(account)
+          )
+          if (smartAccountOnTheSameSlot) {
+            this.selectAccount(smartAccountOnTheSameSlot.account)
+          }
+        }
         break
       }
 
@@ -985,6 +1018,14 @@ export class AccountPickerController extends EventEmitter {
 
     // TODO: Should never happen, but could benefit with better error handling
     if (!nextAccount) console.error('accountPicker: no next account found')
+
+    // Back to the picker's own page size, on the page that holds the selected slot
+    if (pageSize !== originalPageSize) {
+      await this.setPage({
+        page: nextAccount ? Math.ceil(currentPage / originalPageSize) : originalPage,
+        pageSize: originalPageSize
+      })
+    }
 
     this.selectNextAccountStatus = 'SUCCESS'
     await this.forceEmitUpdate()
