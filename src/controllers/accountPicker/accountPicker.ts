@@ -955,14 +955,18 @@ export class AccountPickerController extends EventEmitter {
     this.selectNextAccountStatus = 'LOADING'
     await this.forceEmitUpdate()
 
-    let currentPage: number = this.page
     let nextAccount: AccountWithNetworkMeta | undefined
     const maxPages = 10000 // limit, acts as a safeguard to prevent infinite loops
 
     // A page lists only one smart account, the lowest unused one, so the smart
     // account of the picked basic account's slot is on the page only when the
-    // page holds that one slot.
-    const pageSize = this.shouldSelectSmartAccountAutomatically ? 1 : this.pageSize
+    // page holds that one slot. The search then pages one slot at a time,
+    // starting from the first slot of the current page.
+    const originalPage = this.page
+    const originalPageSize = this.pageSize
+    const pageSize = this.shouldSelectSmartAccountAutomatically ? 1 : originalPageSize
+    let currentPage: number =
+      pageSize === originalPageSize ? originalPage : (originalPage - 1) * originalPageSize + 1
 
     while (currentPage <= maxPages) {
       // TODO: Flag that excludes getting smart account key addresses
@@ -1014,6 +1018,14 @@ export class AccountPickerController extends EventEmitter {
 
     // TODO: Should never happen, but could benefit with better error handling
     if (!nextAccount) console.error('accountPicker: no next account found')
+
+    // Back to the picker's own page size, on the page that holds the selected slot
+    if (pageSize !== originalPageSize) {
+      await this.setPage({
+        page: nextAccount ? Math.ceil(currentPage / originalPageSize) : originalPage,
+        pageSize: originalPageSize
+      })
+    }
 
     this.selectNextAccountStatus = 'SUCCESS'
     await this.forceEmitUpdate()
