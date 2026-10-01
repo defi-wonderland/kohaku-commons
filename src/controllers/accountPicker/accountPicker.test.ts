@@ -18,7 +18,7 @@ import {
 import { networks } from '../../consts/networks'
 import { Account } from '../../interfaces/account'
 import { Storage } from '../../interfaces/storage'
-import { isSmartAccount } from '../../libs/account/account'
+import { getBasicAccount, isSmartAccount } from '../../libs/account/account'
 import { getPrivateKeyFromSeed, KeyIterator } from '../../libs/keyIterator/keyIterator'
 import { getRpcProvider } from '../../services/provider'
 import { AccountsController } from '../accounts/accounts'
@@ -354,6 +354,54 @@ describe('AccountPicker', () => {
         .filter((a) => !isSmartAccount(a.account))
         .map((a) => a.account.addr)
     ).toEqual([basicAccAddr])
+  })
+
+  test('should select the smart account of the next slot when a larger page starts with an imported slot', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    const addrAt = (index: number) =>
+      new Wallet(getPrivateKeyFromSeed(seed, null, index, BIP44_STANDARD_DERIVATION_TEMPLATE))
+        .address
+    const importedBasicAccAddr = addrAt(0)
+    const picker = new AccountPickerController({
+      accounts: {
+        accounts: [getBasicAccount(importedBasicAccAddr, [])],
+        onUpdate: () => () => {}
+      } as unknown as AccountsController,
+      keystore: {
+        keys: [{ addr: importedBasicAccAddr, type: 'internal' }],
+        onUpdate: () => () => {}
+      } as unknown as KeystoreController,
+      networks: networksCtrl,
+      providers: providersCtrl,
+      relayerUrl,
+      fetch,
+      externalSignerControllers: {},
+      onAddAccountsSuccessCallback: () => Promise.resolve()
+    })
+    picker.setInitParams({
+      keyIterator: new KeyIterator(seed),
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      pageSize: 2,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: true
+    })
+    await picker.init()
+    await picker.selectNextAccount()
+
+    const selectedSmartAccounts = picker.selectedAccounts.filter((a) => isSmartAccount(a.account))
+    expect(selectedSmartAccounts).toHaveLength(1)
+    expect(selectedSmartAccounts[0].accountKeys).toEqual([
+      {
+        addr: addrAt(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1),
+        index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1,
+        slot: 2
+      }
+    ])
+    expect(
+      picker.selectedAccounts.filter((a) => !isSmartAccount(a.account)).map((a) => a.account.addr)
+    ).toEqual([addrAt(1)])
   })
 
   test('should select only the basic account of the next slot when importing a seed', async () => {

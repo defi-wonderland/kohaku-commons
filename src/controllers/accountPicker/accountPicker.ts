@@ -959,13 +959,18 @@ export class AccountPickerController extends EventEmitter {
     let nextAccount: AccountWithNetworkMeta | undefined
     const maxPages = 10000 // limit, acts as a safeguard to prevent infinite loops
 
+    // A page lists only one smart account, the lowest unused one, so the smart
+    // account of the picked basic account's slot is on the page only when the
+    // page holds that one slot.
+    const pageSize = this.shouldSelectSmartAccountAutomatically ? 1 : this.pageSize
+
     while (currentPage <= maxPages) {
       // TODO: Flag that excludes getting smart account key addresses
       // Load the accounts for the current page
       // eslint-disable-next-line no-await-in-loop
       await this.setPage({
         page: currentPage,
-        pageSize: this.pageSize,
+        pageSize,
         shouldGetAccountsUsedOnNetworks: false,
         shouldSearchForLinkedAccounts: false
       })
