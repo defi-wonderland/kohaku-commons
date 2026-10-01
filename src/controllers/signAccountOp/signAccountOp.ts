@@ -157,7 +157,9 @@ export const isRefusedCallToSelf = (
   call: AccountOp['calls'][number],
   accountOp: Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'>
 ): boolean => {
-  if (!isAddress(call.to) || getAddress(call.to) !== getAddress(accountOp.accountAddr)) return false
+  if (!isAddress(call.to) || getAddress(call.to) !== getAddress(accountOp.accountAddr)) {
+    return false
+  }
 
   return !isRecoveryKitGrant(accountOp, call)
 }
@@ -359,11 +361,12 @@ export class SignAccountOpController extends EventEmitter {
       return { title: invalidAccountOpError, code: 'NO_CALLS' }
     }
 
-    if (this.accountOp.calls.some((c) => isRefusedCallToSelf(c, this.accountOp)))
+    if (this.accountOp.calls.some((c) => isRefusedCallToSelf(c, this.accountOp))) {
       return {
         title: 'A malicious transaction found in this batch.',
         code: 'CALL_TO_SELF'
       }
+    }
 
     let callError: SignAccountOpError | null = null
 
