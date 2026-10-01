@@ -1,7 +1,7 @@
 import { AccountOpAction, Action } from '../../controllers/actions/actions'
 import { Account, AccountId } from '../../interfaces/account'
 import { DappProviderRequest } from '../../interfaces/dapp'
-import { RecoveryKit } from '../../interfaces/recoveryKit'
+import { AccountOpRecoveryKit, RecoveryKit } from '../../interfaces/recoveryKit'
 import { Calls, DappUserRequest, SignUserRequest, UserRequest } from '../../interfaces/userRequest'
 import generateSpoofSig from '../../utils/generateSpoofSig'
 import { AccountOp } from '../accountOp/accountOp'
@@ -30,7 +30,9 @@ export const batchCallsFromUserRequests = ({
   )
 }
 
-// The recovery kit mark comes only from the wallet's own calls request of this account and chain
+// The recovery kit mark comes only from the wallet's own calls request of this account and chain,
+// and names that request. The calls of a batch are told apart by their request id only, so there
+// is no mark when more than one request carries the mark or when another request shares its id.
 const getRecoveryKitFromUserRequests = ({
   accountAddr,
   chainId,
@@ -39,16 +41,25 @@ const getRecoveryKitFromUserRequests = ({
   accountAddr: AccountId
   chainId: bigint
   userRequests: UserRequest[]
-}): RecoveryKit | undefined => {
-  const userReqWithRecoveryKit = userRequests.find(
+}): AccountOpRecoveryKit | undefined => {
+  const userReqsWithRecoveryKit = userRequests.filter(
     (req) =>
       req.action.kind === 'calls' &&
       req.meta.accountAddr === accountAddr &&
       req.meta.chainId === chainId &&
       req.meta.recoveryKit
   )
+  if (userReqsWithRecoveryKit.length !== 1) {
+    return undefined
+  }
 
-  return userReqWithRecoveryKit ? userReqWithRecoveryKit.meta.recoveryKit : undefined
+  const [userReqWithRecoveryKit] = userReqsWithRecoveryKit
+  if (userRequests.filter((req) => req.id === userReqWithRecoveryKit.id).length !== 1) {
+    return undefined
+  }
+
+  const { manager, auditedActions } = userReqWithRecoveryKit.meta.recoveryKit as RecoveryKit
+  return { manager, auditedActions, fromUserRequestId: userReqWithRecoveryKit.id }
 }
 
 // The op's meta with the recovery kit mark of the requests still batched in it, or without one

@@ -18,13 +18,19 @@ const isCallTo = (call: Pick<IrCall, 'to'>, addr: string): boolean =>
 // The recovery kit grants each audited action a privilege on the account through a call the
 // account makes to itself: setAddrPrivilege(slot, value), where the slot is the address taken
 // from keccak256(abi.encode("kit", action)) and the value is keccak256(abi.encode(action, "")).
-// That exact call is trusted only when the same batch commits the kit's setup on its manager.
+// That exact call is trusted only when the same batch commits the kit's setup on its manager,
+// and only when both calls come from the one user request that carries the recovery kit.
 const findRecoveryKitAction = (
   accountOp: Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'>,
-  call: Pick<IrCall, 'to' | 'data'>
+  call: Pick<IrCall, 'to' | 'data' | 'fromUserRequestId'>
 ): string | undefined => {
   const recoveryKit = accountOp.meta?.recoveryKit
   if (!recoveryKit || !isCallTo(call, accountOp.accountAddr)) {
+    return undefined
+  }
+  const isFromKitRequest = (c: Pick<IrCall, 'fromUserRequestId'>): boolean =>
+    c.fromUserRequestId !== undefined && c.fromUserRequestId === recoveryKit.fromUserRequestId
+  if (!isFromKitRequest(call)) {
     return undefined
   }
   if (!call.data || call.data.slice(0, 10).toLowerCase() !== SET_ADDR_PRIVILEGE_SELECTOR) {
@@ -32,6 +38,7 @@ const findRecoveryKitAction = (
   }
   const commitsSetup = accountOp.calls.some(
     (c) =>
+      isFromKitRequest(c) &&
       isCallTo(c, recoveryKit.manager) &&
       !!c.data &&
       c.data.slice(0, 10).toLowerCase() === COMMIT_SETUP_SELECTOR
@@ -58,7 +65,7 @@ const findRecoveryKitAction = (
 
 export const isRecoveryKitGrant = (
   accountOp: Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'>,
-  call: Pick<IrCall, 'to' | 'data'>
+  call: Pick<IrCall, 'to' | 'data' | 'fromUserRequestId'>
 ): boolean => findRecoveryKitAction(accountOp, call) !== undefined
 
 // Any grant other than the entry point's lets the granted address act as the called account,

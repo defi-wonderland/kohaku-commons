@@ -38,7 +38,7 @@ const buildOp = (userRequests: UserRequest[], actionsQueue: AccountOpAction[] = 
 describe('The recovery kit mark on an account op', () => {
   test('an op built from a request that carries the mark has it', () => {
     const { accountOp } = buildOp([callsRequest(1, { recoveryKit })])
-    expect(accountOp.meta?.recoveryKit).toEqual(recoveryKit)
+    expect(accountOp.meta?.recoveryKit).toEqual({ ...recoveryKit, fromUserRequestId: 1 })
   })
 
   test('an op built from requests without the mark has none', () => {
@@ -51,14 +51,14 @@ describe('The recovery kit mark on an account op', () => {
     const action = buildOp([marked])
     const { accountOp } = buildOp([marked, callsRequest(2)], [action])
     expect(accountOp.calls).toHaveLength(2)
-    expect(accountOp.meta?.recoveryKit).toEqual(recoveryKit)
+    expect(accountOp.meta?.recoveryKit).toEqual({ ...recoveryKit, fromUserRequestId: 1 })
   })
 
   test('a marked request batched after an unmarked one gives the op the mark', () => {
     const unmarked = callsRequest(1)
     const action = buildOp([unmarked])
     const { accountOp } = buildOp([unmarked, callsRequest(2, { recoveryKit })], [action])
-    expect(accountOp.meta?.recoveryKit).toEqual(recoveryKit)
+    expect(accountOp.meta?.recoveryKit).toEqual({ ...recoveryKit, fromUserRequestId: 2 })
   })
 
   test('the op loses the mark once the marked request leaves the batch', () => {
@@ -83,6 +83,39 @@ describe('The recovery kit mark on an account op', () => {
       action: { kind: 'message', message: '0x' }
     }
     const { accountOp } = buildOp([callsRequest(1), messageRequest])
+    expect(accountOp.meta).not.toHaveProperty('recoveryKit')
+  })
+
+  test('the mark names the request that carries it, whatever id the mark itself holds', () => {
+    const markNamingAnotherRequest = { ...recoveryKit, fromUserRequestId: 1 }
+    const { accountOp } = buildOp([
+      callsRequest(1),
+      callsRequest(2, { recoveryKit: markNamingAnotherRequest })
+    ])
+    expect(accountOp.meta?.recoveryKit).toEqual({ ...recoveryKit, fromUserRequestId: 2 })
+  })
+
+  test('there is no mark when another request shares the id of the marked one', () => {
+    const marked = callsRequest(1, { recoveryKit })
+    expect(buildOp([marked, callsRequest(1)]).accountOp.meta).not.toHaveProperty('recoveryKit')
+    expect(
+      buildOp([marked, callsRequest(1, { accountAddr: otherAccountAddr })]).accountOp.meta
+    ).not.toHaveProperty('recoveryKit')
+  })
+
+  test('the op loses the mark when a request with the id of the marked one joins the batch', () => {
+    const marked = callsRequest(1, { recoveryKit })
+    const action = buildOp([marked])
+    const { accountOp } = buildOp([marked, callsRequest(1)], [action])
+    expect(accountOp.calls).toHaveLength(2)
+    expect(accountOp.meta).not.toHaveProperty('recoveryKit')
+  })
+
+  test('there is no mark when more than one request of the batch carries one', () => {
+    const { accountOp } = buildOp([
+      callsRequest(1, { recoveryKit }),
+      callsRequest(2, { recoveryKit })
+    ])
     expect(accountOp.meta).not.toHaveProperty('recoveryKit')
   })
 })

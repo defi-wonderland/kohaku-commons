@@ -36,6 +36,7 @@ import { Hex } from '../../interfaces/hex'
 import { ExternalKey, ExternalSignerControllers, InternalKey, Key } from '../../interfaces/keystore'
 import { Network } from '../../interfaces/network'
 import { RPCProvider } from '../../interfaces/provider'
+import { AccountOpRecoveryKit } from '../../interfaces/recoveryKit'
 import {
   SignAccountOpError,
   TraceCallDiscoveryStatus,
@@ -172,6 +173,8 @@ export type SignAccountOpUpdateProps = {
   signingKeyAddr?: Key['addr']
   signingKeyType?: InternalKey['type'] | ExternalKey['type']
   calls?: AccountOp['calls']
+  // set when present, removed when the key is present with no value, kept when the key is left out
+  recoveryKit?: AccountOpRecoveryKit
   rbfAccountOps?: { [key: string]: SubmittedAccountOp | null }
   bundlerGasPrices?: { speeds: GasSpeeds; bundler: BUNDLER }
   blockGasLimit?: bigint
@@ -807,20 +810,22 @@ export class SignAccountOpController extends EventEmitter {
     await this.#portfolio.simulateAccountOp(this.accountOp)
   }
 
-  update({
-    gasPrices,
-    feeToken,
-    paidBy,
-    speed,
-    signingKeyAddr,
-    signingKeyType,
-    calls,
-    rbfAccountOps,
-    bundlerGasPrices,
-    blockGasLimit,
-    signedTransactionsCount,
-    hasNewEstimation
-  }: SignAccountOpUpdateProps) {
+  update(props: SignAccountOpUpdateProps) {
+    const {
+      gasPrices,
+      feeToken,
+      paidBy,
+      speed,
+      signingKeyAddr,
+      signingKeyType,
+      calls,
+      recoveryKit,
+      rbfAccountOps,
+      bundlerGasPrices,
+      blockGasLimit,
+      signedTransactionsCount,
+      hasNewEstimation
+    } = props
     try {
       // This must be at the top, otherwise it won't be updated because
       // most updates are frozen during the signing process
@@ -852,6 +857,14 @@ export class SignAccountOpController extends EventEmitter {
         }
       }
 
+      if ('recoveryKit' in props) {
+        if (recoveryKit) {
+          this.accountOp.meta = { ...this.accountOp.meta, recoveryKit }
+        } else if (this.accountOp.meta) {
+          delete this.accountOp.meta.recoveryKit
+        }
+      }
+
       if (Array.isArray(calls)) {
         // we should update if the arrays are with diff length
         let shouldUpdate = this.accountOp.calls.length !== calls.length
@@ -864,7 +877,8 @@ export class SignAccountOpController extends EventEmitter {
             if (
               call.to !== newCall.to ||
               call.data !== newCall.data ||
-              call.value !== newCall.value
+              call.value !== newCall.value ||
+              call.fromUserRequestId !== newCall.fromUserRequestId
             )
               shouldUpdate = true
           })
