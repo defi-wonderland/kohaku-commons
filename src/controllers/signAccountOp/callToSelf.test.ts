@@ -3,7 +3,10 @@ import { AbiCoder, getAddress, id, Interface, keccak256, ZeroHash } from 'ethers
 import { describe, expect, test } from '@jest/globals'
 
 import AmbireAccount from '../../../contracts/compiled/AmbireAccount.json'
+import { Session } from '../../classes/session'
+import { SignUserRequest } from '../../interfaces/userRequest'
 import { AccountOp } from '../../libs/accountOp/accountOp'
+import { makeAccountOpAction } from '../../libs/requests/requests'
 import { isRefusedCallToSelf } from './signAccountOp'
 
 const accountAddr = '0x77777777789A8BBEE6C64381e5E89E501fb0e4c8'
@@ -198,5 +201,35 @@ describe('Calls to the account itself', () => {
     const op = opWith([commitSetup, kitGrant])
     expect(isRefusedCallToSelf({ ...kitGrant, to: otherAddr }, op)).toBe(false)
     expect(isRefusedCallToSelf({ to: otherAddr, value: 0n, data: '0x' }, op)).toBe(false)
+  })
+
+  test('the kit grant in an op built from the wallet request with the kit is allowed, and refused without it', () => {
+    const buildOp = (meta: Partial<SignUserRequest['meta']>) =>
+      makeAccountOpAction({
+        account: {
+          addr: accountAddr,
+          associatedKeys: [otherAddr],
+          initialPrivileges: [],
+          creation: null,
+          preferences: { label: 'Account', pfp: accountAddr }
+        },
+        chainId: 1n,
+        nonce: 0n,
+        actionsQueue: [],
+        userRequests: [
+          {
+            id: 1,
+            action: { kind: 'calls', calls: [commitSetup, kitGrant] },
+            session: new Session(),
+            meta: { isSignAction: true, accountAddr, chainId: 1n, ...meta }
+          }
+        ]
+      }).accountOp
+
+    const markedOp = buildOp({ recoveryKit })
+    expect(markedOp.calls.some((c) => isRefusedCallToSelf(c, markedOp))).toBe(false)
+
+    const unmarkedOp = buildOp({})
+    expect(unmarkedOp.calls.some((c) => isRefusedCallToSelf(c, unmarkedOp))).toBe(true)
   })
 })

@@ -33,6 +33,7 @@ import { TokenResult } from '../../libs/portfolio'
 import {
   ACCOUNT_SWITCH_USER_REQUEST,
   buildSwitchAccountUserRequest,
+  getAccountOpMetaWithRecoveryKit,
   makeAccountOpAction
 } from '../../libs/requests/requests'
 import { parse } from '../../libs/richJson/richJson'
@@ -402,6 +403,10 @@ export class RequestsController extends EventEmitter {
         accountOpAction.accountOp.calls = this.#batchCallsFromUserRequests(
           meta.accountAddr,
           meta.chainId
+        )
+        accountOpAction.accountOp.meta = getAccountOpMetaWithRecoveryKit(
+          accountOpAction.accountOp,
+          this.userRequests
         )
         const signAccountOp = this.#getSignAccountOp()
 

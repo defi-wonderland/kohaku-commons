@@ -1,8 +1,10 @@
 import { AccountOpAction, Action } from '../../controllers/actions/actions'
 import { Account, AccountId } from '../../interfaces/account'
 import { DappProviderRequest } from '../../interfaces/dapp'
+import { RecoveryKit } from '../../interfaces/recoveryKit'
 import { Calls, DappUserRequest, SignUserRequest, UserRequest } from '../../interfaces/userRequest'
 import generateSpoofSig from '../../utils/generateSpoofSig'
+import { AccountOp } from '../accountOp/accountOp'
 import { Call } from '../accountOp/types'
 
 export const batchCallsFromUserRequests = ({
@@ -26,6 +28,50 @@ export const batchCallsFromUserRequests = ({
     },
     []
   )
+}
+
+// The recovery kit mark comes only from the wallet's own calls request of this account and chain
+const getRecoveryKitFromUserRequests = ({
+  accountAddr,
+  chainId,
+  userRequests
+}: {
+  accountAddr: AccountId
+  chainId: bigint
+  userRequests: UserRequest[]
+}): RecoveryKit | undefined => {
+  const userReqWithRecoveryKit = userRequests.find(
+    (req) =>
+      req.action.kind === 'calls' &&
+      req.meta.accountAddr === accountAddr &&
+      req.meta.chainId === chainId &&
+      req.meta.recoveryKit
+  )
+
+  return userReqWithRecoveryKit ? userReqWithRecoveryKit.meta.recoveryKit : undefined
+}
+
+// The op's meta with the recovery kit mark of the requests still batched in it, or without one
+export const getAccountOpMetaWithRecoveryKit = (
+  accountOp: AccountOp,
+  userRequests: UserRequest[]
+): AccountOp['meta'] => {
+  const recoveryKit = getRecoveryKitFromUserRequests({
+    accountAddr: accountOp.accountAddr,
+    chainId: accountOp.chainId,
+    userRequests
+  })
+
+  if (recoveryKit) {
+    return { ...accountOp.meta, recoveryKit }
+  }
+  if (!accountOp.meta) {
+    return accountOp.meta
+  }
+
+  const meta = { ...accountOp.meta }
+  delete meta.recoveryKit
+  return meta
 }
 
 export const ACCOUNT_SWITCH_USER_REQUEST = 'ACCOUNT_SWITCH_USER_REQUEST'
@@ -94,6 +140,10 @@ export const makeAccountOpAction = ({
     // a nonce discrepancy issue. This makes sure we're with the
     // latest nonce should the user decide to batch
     accountOpAction.accountOp.nonce = nonce
+    accountOpAction.accountOp.meta = getAccountOpMetaWithRecoveryKit(
+      accountOpAction.accountOp,
+      userRequests
+    )
     return accountOpAction
   }
 
@@ -128,6 +178,12 @@ export const makeAccountOpAction = ({
   )
   const setDelegation = userReqWithDelegation ? userReqWithDelegation.meta.setDelegation : undefined
 
+  const recoveryKit = getRecoveryKitFromUserRequests({
+    accountAddr: account.addr,
+    chainId,
+    userRequests
+  })
+
   const accountOp: AccountOpAction['accountOp'] = {
     accountAddr: account.addr,
     chainId,
@@ -146,7 +202,8 @@ export const makeAccountOpAction = ({
     meta: {
       paymasterService,
       walletSendCallsVersion,
-      setDelegation
+      setDelegation,
+      ...(recoveryKit && { recoveryKit })
     }
   }
 
