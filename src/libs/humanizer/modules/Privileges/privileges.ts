@@ -8,8 +8,9 @@ import { getAction, getAddressVisualization, getKnownName, getLabel, getWarning 
 
 const iface = new Interface(AmbireAccount.abi)
 const SET_ADDR_PRIVILEGE_SELECTOR = iface.getFunction('setAddrPrivilege')!.selector
-// The recovery kit manager's commitSetup(bytes32,uint256,bytes,bytes)
-const COMMIT_SETUP_SELECTOR = id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)
+// The recovery kit manager's commitSetup(address action, bytes32 setupCommitment, uint64 nonce,
+// bytes publicMetadata, bytes privateMetadata)
+const COMMIT_SETUP_SELECTOR = id('commitSetup(address,bytes32,uint64,bytes,bytes)').slice(0, 10)
 const abiCoder = AbiCoder.defaultAbiCoder()
 
 const isCallTo = (call: Pick<IrCall, 'to'>, addr: string): boolean =>

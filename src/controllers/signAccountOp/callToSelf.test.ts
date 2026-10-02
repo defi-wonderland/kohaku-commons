@@ -34,7 +34,9 @@ const kitGrant = {
 const commitSetup = {
   to: manager,
   value: 0n,
-  data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+  data: new Interface([
+    'function commitSetup(address, bytes32, uint64, bytes, bytes)'
+  ]).encodeFunctionData('commitSetup', [auditedAction, ZeroHash, 1, '0x', '0x']),
   fromUserRequestId: kitRequestId
 }
 const recoveryKit = { manager, auditedActions: [auditedAction] }

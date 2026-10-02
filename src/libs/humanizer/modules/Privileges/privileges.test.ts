@@ -1,4 +1,4 @@
-import { AbiCoder, getAddress, id, Interface, keccak256 } from 'ethers'
+import { AbiCoder, getAddress, Interface, keccak256, ZeroHash } from 'ethers'
 
 import { expect } from '@jest/globals'
 
@@ -29,6 +29,11 @@ const transactions: { [key: string]: Call[] } = {
     }
   ]
 }
+
+const commitSetupData = (action: string) =>
+  new Interface([
+    'function commitSetup(address, bytes32, uint64, bytes, bytes)'
+  ]).encodeFunctionData('commitSetup', [action, ZeroHash, 1, '0x', '0x'])
 
 describe('privileges', () => {
   const accountOp: AccountOp = {
@@ -196,7 +201,7 @@ describe('privileges', () => {
     const commitSetup: Call = {
       to: manager,
       value: 0n,
-      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+      data: commitSetupData(action),
       fromUserRequestId: 1
     }
     const calls = [commitSetup, kitGrant]
@@ -248,7 +253,7 @@ describe('privileges', () => {
     const commitSetup: Call = {
       to: manager,
       value: 0n,
-      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+      data: commitSetupData(auditedAction),
       fromUserRequestId: kitRequestId
     }
     const fromOtherRequest = (call: Call): Call => ({ ...call, fromUserRequestId: otherRequestId })
@@ -311,6 +316,34 @@ describe('privileges', () => {
         fromUserRequestId: kitRequestId
       })
       expect(lowerCaseManager.warnings).toBeUndefined()
+    })
+
+    test('beside a commitSetup with the earlier four-argument signature is shown as a danger', () => {
+      const fourArgumentCommit: Call = {
+        ...commitSetup,
+        data: new Interface([
+          'function commitSetup(bytes32, uint256, bytes, bytes)'
+        ]).encodeFunctionData('commitSetup', [ZeroHash, 1, '0x', '0x'])
+      }
+      const calls = [fourArgumentCommit, kitGrant]
+      const [, shown] = humanize(calls)
+      expect(shown.warnings).toMatchObject([{ level: 'danger' }])
+      expect(
+        isRecoveryKitGrant(
+          {
+            ...accountOp,
+            calls,
+            meta: {
+              recoveryKit: {
+                manager,
+                auditedActions: [auditedAction],
+                fromUserRequestId: kitRequestId
+              }
+            }
+          },
+          kitGrant
+        )
+      ).toBe(false)
     })
 
     test('with commitSetup sent to another address than the manager is shown as a danger', () => {
