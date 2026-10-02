@@ -1,4 +1,4 @@
-import { PaymasterService } from 'libs/erc7677/types'
+import { PaymasterService } from '../../libs/erc7677/types'
 import { Session } from '../../classes/session'
 import { SignUserRequest } from '../../interfaces/userRequest'
 
