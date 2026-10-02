@@ -250,6 +250,25 @@ describe('EstimationController payers', () => {
     expect(nativeToCheck()).toEqual([otherListedAddr, listedBasicAddr])
   })
 
+  test('a key with no native balance is read but gets no option where neither a relayer nor a bundler runs', async () => {
+    const emptyKeyAddr = '0x16c81367c30c71d6B712355255A07FCe8fd3b5cC'
+    const account = makeSmartAccount([emptyKeyAddr])
+    const { controller, nativeToCheck } = setup(
+      account,
+      [makeBasicAccount(listedBasicAddr)],
+      [makeKey(emptyKeyAddr), makeKey(listedBasicAddr)]
+    )
+
+    await controller.estimate(makeOp(account))
+
+    expect(controller.status).toBe(EstimationStatus.Success)
+    expect(nativeToCheck()).toEqual([emptyKeyAddr, listedBasicAddr])
+    expect(controller.availableFeeOptions.map((opt) => opt.paidBy)).toEqual([
+      account.addr,
+      listedBasicAddr
+    ])
+  })
+
   test('a basic account reads no other payer', async () => {
     const account = makeBasicAccount(listedBasicAddr)
     const { controller, nativeToCheck } = setup(

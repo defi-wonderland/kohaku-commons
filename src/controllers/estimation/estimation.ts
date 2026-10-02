@@ -144,8 +144,10 @@ export class EstimationController extends EventEmitter {
     const feeTokens =
       [...networkFeeTokens, ...gasTankFeeTokens].filter((t) => t.flags.isFeeToken) || []
 
-    // Here, we list EOA accounts for which you can also obtain an estimation of the AccountOp payment.
-    // In the case of operating with a smart account (an account with creation code), all other EOAs can pay the fee.
+    // Here, we list the EOAs for which you can also obtain an estimation of the AccountOp payment.
+    // In the case of operating with a smart account (an account with creation code), the payers
+    // whose native balance we read are its own keys that the keystore holds, then the listed EOA
+    // accounts that have a key.
     //
     // If the current account is an EOA, only this account can pay the fee,
     // and there's no need for checking other EOA accounts native balances.
