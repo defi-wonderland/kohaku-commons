@@ -18,6 +18,14 @@ import { MainController } from './main'
 
 // Public API key, shared by Socket, for testing purposes only
 const swapApiKey = '72a5b4b0-e727-48be-8aa1-5da9d62fe635'
+// The privacy pools and Railgun services are not under test here
+const privacyServicesOptions = {
+  privacyPoolsAspUrl: '',
+  privacyPoolsRelayerUrl: '',
+  railgunRelayerUrl: '',
+  alchemyApiKey: '',
+  hypersyncApiKey: ''
+}
 
 const windowManager = mockWindowManager().windowManager
 
@@ -86,7 +94,8 @@ describe('Main Controller ', () => {
       externalSignerControllers: {},
       windowManager,
       notificationManager,
-      velcroUrl
+      velcroUrl,
+      ...privacyServicesOptions
     })
     // eslint-disable-next-line no-promise-executor-return
     await new Promise((resolve) => {
@@ -167,7 +176,8 @@ describe('Main Controller ', () => {
       notificationManager,
       keystoreSigners: { internal: KeystoreSigner },
       externalSignerControllers: {},
-      velcroUrl
+      velcroUrl,
+      ...privacyServicesOptions
     })
 
     while (!controller.isReady) {
@@ -211,7 +221,8 @@ describe('Main Controller ', () => {
       notificationManager,
       keystoreSigners: { internal: KeystoreSigner },
       externalSignerControllers: {},
-      velcroUrl
+      velcroUrl,
+      ...privacyServicesOptions
     })
 
     mainCtrl.accounts.accounts = [
