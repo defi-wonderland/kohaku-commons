@@ -3,7 +3,10 @@ import { AbiCoder, getAddress, id, Interface, keccak256, ZeroHash } from 'ethers
 import { describe, expect, test } from '@jest/globals'
 
 import AmbireAccount from '../../../contracts/compiled/AmbireAccount.json'
+import { Session } from '../../classes/session'
+import { SignUserRequest } from '../../interfaces/userRequest'
 import { AccountOp } from '../../libs/accountOp/accountOp'
+import { makeAccountOpAction } from '../../libs/requests/requests'
 import { isRefusedCallToSelf } from './signAccountOp'
 
 const accountAddr = '0x77777777789A8BBEE6C64381e5E89E501fb0e4c8'
@@ -20,21 +23,30 @@ const kitValue = (action: string) => keccak256(abiCoder.encode(['address', 'stri
 const grantData = (slot: string, value: string) =>
   ambireAccount.encodeFunctionData('setAddrPrivilege', [slot, value])
 
+const kitRequestId = 1
+const otherRequestId = 2
 const kitGrant = {
   to: accountAddr,
   value: 0n,
-  data: grantData(kitSlot(auditedAction), kitValue(auditedAction))
+  data: grantData(kitSlot(auditedAction), kitValue(auditedAction)),
+  fromUserRequestId: kitRequestId
 }
 const commitSetup = {
   to: manager,
   value: 0n,
-  data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+  data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+  fromUserRequestId: kitRequestId
 }
 const recoveryKit = { manager, auditedActions: [auditedAction] }
+const opRecoveryKit = { ...recoveryKit, fromUserRequestId: kitRequestId }
+const fromOtherRequest = <T extends AccountOp['calls'][number]>(call: T): T => ({
+  ...call,
+  fromUserRequestId: otherRequestId
+})
 
 const opWith = (
   calls: AccountOp['calls'],
-  meta: AccountOp['meta'] = { recoveryKit }
+  meta: AccountOp['meta'] = { recoveryKit: opRecoveryKit }
 ): Pick<AccountOp, 'accountAddr' | 'calls' | 'meta'> => ({ accountAddr, calls, meta })
 
 describe('Calls to the account itself', () => {
@@ -46,7 +58,8 @@ describe('Calls to the account itself', () => {
     const upperCaseGrant = {
       to: accountAddr.toLowerCase(),
       value: 0n,
-      data: `0x${kitGrant.data.slice(2).toUpperCase()}`
+      data: `0x${kitGrant.data.slice(2).toUpperCase()}`,
+      fromUserRequestId: kitRequestId
     }
     expect(
       isRefusedCallToSelf(
@@ -68,7 +81,7 @@ describe('Calls to the account itself', () => {
       isRefusedCallToSelf(
         kitGrant,
         opWith([lowerCaseCommit, kitGrant], {
-          recoveryKit: { ...recoveryKit, manager: checksummedManager }
+          recoveryKit: { ...opRecoveryKit, manager: checksummedManager }
         })
       )
     ).toBe(false)
@@ -76,7 +89,7 @@ describe('Calls to the account itself', () => {
       isRefusedCallToSelf(
         kitGrant,
         opWith([{ ...commitSetup, to: checksummedManager }, kitGrant], {
-          recoveryKit: { ...recoveryKit, manager: checksummedManager.toLowerCase() }
+          recoveryKit: { ...opRecoveryKit, manager: checksummedManager.toLowerCase() }
         })
       )
     ).toBe(false)
@@ -87,13 +100,17 @@ describe('Calls to the account itself', () => {
     const grant = {
       to: accountAddr,
       value: 0n,
-      data: grantData(kitSlot(checksummedAction), kitValue(checksummedAction))
+      data: grantData(kitSlot(checksummedAction), kitValue(checksummedAction)),
+      fromUserRequestId: kitRequestId
     }
     expect(
       isRefusedCallToSelf(
         grant,
         opWith([commitSetup, grant], {
-          recoveryKit: { manager, auditedActions: [checksummedAction.toLowerCase()] }
+          recoveryKit: {
+            ...opRecoveryKit,
+            auditedActions: [checksummedAction.toLowerCase()]
+          }
         })
       )
     ).toBe(false)
@@ -103,7 +120,8 @@ describe('Calls to the account itself', () => {
     const otherManagerCall = {
       to: manager,
       value: 0n,
-      data: `${id('commitSetup(bytes32,uint256,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+      data: `${id('commitSetup(bytes32,uint256,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+      fromUserRequestId: kitRequestId
     }
     expect(isRefusedCallToSelf(kitGrant, opWith([otherManagerCall, kitGrant]))).toBe(true)
   })
@@ -112,13 +130,14 @@ describe('Calls to the account itself', () => {
     const grant = {
       to: accountAddr,
       value: 0n,
-      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction))
+      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction)),
+      fromUserRequestId: kitRequestId
     }
     expect(
       isRefusedCallToSelf(
         grant,
         opWith([commitSetup, grant], {
-          recoveryKit: { manager, auditedActions: [auditedAction, unlistedAction] }
+          recoveryKit: { ...opRecoveryKit, auditedActions: [auditedAction, unlistedAction] }
         })
       )
     ).toBe(false)
@@ -128,13 +147,14 @@ describe('Calls to the account itself', () => {
     const grant = {
       to: accountAddr,
       value: 0n,
-      data: grantData(kitSlot(auditedAction), kitValue(unlistedAction))
+      data: grantData(kitSlot(auditedAction), kitValue(unlistedAction)),
+      fromUserRequestId: kitRequestId
     }
     expect(
       isRefusedCallToSelf(
         grant,
         opWith([commitSetup, grant], {
-          recoveryKit: { manager, auditedActions: [auditedAction, unlistedAction] }
+          recoveryKit: { ...opRecoveryKit, auditedActions: [auditedAction, unlistedAction] }
         })
       )
     ).toBe(true)
@@ -153,7 +173,8 @@ describe('Calls to the account itself', () => {
     const unlistedGrant = {
       to: accountAddr,
       value: 0n,
-      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction))
+      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction)),
+      fromUserRequestId: kitRequestId
     }
     expect(isRefusedCallToSelf(unlistedGrant, opWith([commitSetup, unlistedGrant]))).toBe(true)
   })
@@ -161,7 +182,7 @@ describe('Calls to the account itself', () => {
   test('the kit slot of an audited action with another value is refused', () => {
     const wrongValues = [kitValue(unlistedAction), abiCoder.encode(['uint256'], [1]), ZeroHash]
     wrongValues.forEach((value) => {
-      const grant = { to: accountAddr, value: 0n, data: grantData(kitSlot(auditedAction), value) }
+      const grant = { ...kitGrant, data: grantData(kitSlot(auditedAction), value) }
       expect(isRefusedCallToSelf(grant, opWith([commitSetup, grant]))).toBe(true)
     })
   })
@@ -177,7 +198,8 @@ describe('Calls to the account itself', () => {
     const strangerGrant = {
       to: accountAddr,
       value: 0n,
-      data: grantData(otherAddr, abiCoder.encode(['uint256'], [2]))
+      data: grantData(otherAddr, abiCoder.encode(['uint256'], [2])),
+      fromUserRequestId: kitRequestId
     }
     expect(isRefusedCallToSelf(strangerGrant, opWith([commitSetup, strangerGrant]))).toBe(true)
   })
@@ -198,5 +220,77 @@ describe('Calls to the account itself', () => {
     const op = opWith([commitSetup, kitGrant])
     expect(isRefusedCallToSelf({ ...kitGrant, to: otherAddr }, op)).toBe(false)
     expect(isRefusedCallToSelf({ to: otherAddr, value: 0n, data: '0x' }, op)).toBe(false)
+  })
+
+  test('the kit grant and commitSetup from another request than the marked one are refused', () => {
+    const markedRequestCall = {
+      to: otherAddr,
+      value: 0n,
+      data: '0x',
+      fromUserRequestId: kitRequestId
+    }
+    const otherGrant = fromOtherRequest(kitGrant)
+    const op = opWith([markedRequestCall, fromOtherRequest(commitSetup), otherGrant])
+    expect(isRefusedCallToSelf(otherGrant, op)).toBe(true)
+  })
+
+  test('a grant of another audited action from another request beside the marked grant is refused', () => {
+    const otherGrant = fromOtherRequest({
+      ...kitGrant,
+      data: grantData(kitSlot(unlistedAction), kitValue(unlistedAction))
+    })
+    const op = opWith([commitSetup, kitGrant, otherGrant], {
+      recoveryKit: { ...opRecoveryKit, auditedActions: [auditedAction, unlistedAction] }
+    })
+    expect(isRefusedCallToSelf(kitGrant, op)).toBe(false)
+    expect(isRefusedCallToSelf(otherGrant, op)).toBe(true)
+  })
+
+  test('the kit grant from the marked request with the commitSetup from another is refused', () => {
+    expect(isRefusedCallToSelf(kitGrant, opWith([fromOtherRequest(commitSetup), kitGrant]))).toBe(
+      true
+    )
+  })
+
+  test('the kit grant from another request with the commitSetup from the marked one is refused', () => {
+    const otherGrant = fromOtherRequest(kitGrant)
+    expect(isRefusedCallToSelf(otherGrant, opWith([commitSetup, otherGrant]))).toBe(true)
+  })
+
+  test('a mark that names a request no call comes from exempts nothing', () => {
+    const op = opWith([commitSetup, kitGrant], {
+      recoveryKit: { ...opRecoveryKit, fromUserRequestId: 3 }
+    })
+    expect(isRefusedCallToSelf(kitGrant, op)).toBe(true)
+  })
+
+  test('the kit grant in an op built from the wallet request with the kit is allowed, and refused without it', () => {
+    const buildOp = (meta: Partial<SignUserRequest['meta']>) =>
+      makeAccountOpAction({
+        account: {
+          addr: accountAddr,
+          associatedKeys: [otherAddr],
+          initialPrivileges: [],
+          creation: null,
+          preferences: { label: 'Account', pfp: accountAddr }
+        },
+        chainId: 1n,
+        nonce: 0n,
+        actionsQueue: [],
+        userRequests: [
+          {
+            id: 1,
+            action: { kind: 'calls', calls: [commitSetup, kitGrant] },
+            session: new Session(),
+            meta: { isSignAction: true, accountAddr, chainId: 1n, ...meta }
+          }
+        ]
+      }).accountOp
+
+    const markedOp = buildOp({ recoveryKit })
+    expect(markedOp.calls.some((c) => isRefusedCallToSelf(c, markedOp))).toBe(false)
+
+    const unmarkedOp = buildOp({})
+    expect(unmarkedOp.calls.some((c) => isRefusedCallToSelf(c, unmarkedOp))).toBe(true)
   })
 })

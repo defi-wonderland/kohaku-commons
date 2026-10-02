@@ -1503,7 +1503,10 @@ export class MainController extends EventEmitter {
           await this.requests.actions.addOrUpdateActions([accountOpAction], {
             skipFocus: true
           })
-          this.signAccountOp?.update({ calls: accountOpAction.accountOp.calls })
+          this.signAccountOp?.update({
+            calls: accountOpAction.accountOp.calls,
+            recoveryKit: accountOpAction.accountOp.meta?.recoveryKit
+          })
         }
       }
     } else {

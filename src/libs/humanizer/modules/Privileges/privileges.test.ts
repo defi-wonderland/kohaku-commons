@@ -190,18 +190,20 @@ describe('privileges', () => {
       data: new Interface(AmbireAccount.abi).encodeFunctionData('setAddrPrivilege', [
         slot,
         keccak256(abiCoder.encode(['address', 'string'], [action, '']))
-      ])
+      ]),
+      fromUserRequestId: 1
     }
     const commitSetup: Call = {
       to: manager,
       value: 0n,
-      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+      fromUserRequestId: 1
     }
     const calls = [commitSetup, kitGrant]
     const withKit = {
       ...accountOp,
       calls,
-      meta: { recoveryKit: { manager, auditedActions: [action] } }
+      meta: { recoveryKit: { manager, auditedActions: [action], fromUserRequestId: 1 } }
     }
 
     const [, allowedGrant] = privilegeHumanizer(withKit, calls, humanizerInfo as HumanizerMeta)
@@ -234,18 +236,26 @@ describe('privileges', () => {
       )
     const kitValue = (action: string) =>
       keccak256(abiCoder.encode(['address', 'string'], [action, '']))
+    const kitRequestId = 1
+    const otherRequestId = 2
     const grant = (slot: string, value: string, to = accountOp.accountAddr): Call => ({
       to,
       value: 0n,
-      data: ambireAccount.encodeFunctionData('setAddrPrivilege', [slot, value])
+      data: ambireAccount.encodeFunctionData('setAddrPrivilege', [slot, value]),
+      fromUserRequestId: kitRequestId
     })
     const kitGrant = grant(kitSlot(auditedAction), kitValue(auditedAction))
     const commitSetup: Call = {
       to: manager,
       value: 0n,
-      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+      data: `${id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+      fromUserRequestId: kitRequestId
     }
-    const humanize = (calls: Call[], recoveryKit = { manager, auditedActions: [auditedAction] }) =>
+    const fromOtherRequest = (call: Call): Call => ({ ...call, fromUserRequestId: otherRequestId })
+    const humanize = (
+      calls: Call[],
+      recoveryKit = { manager, auditedActions: [auditedAction], fromUserRequestId: kitRequestId }
+    ) =>
       privilegeHumanizer(
         { ...accountOp, calls, meta: { recoveryKit } },
         calls,
@@ -268,7 +278,13 @@ describe('privileges', () => {
         {
           ...accountOp,
           calls,
-          meta: { recoveryKit: { manager, auditedActions: [auditedAction] } }
+          meta: {
+            recoveryKit: {
+              manager,
+              auditedActions: [auditedAction],
+              fromUserRequestId: kitRequestId
+            }
+          }
         },
         calls,
         humanizerInfo as HumanizerMeta
@@ -291,7 +307,8 @@ describe('privileges', () => {
       expect(lowerCaseCommit.warnings).toBeUndefined()
       const [, lowerCaseManager] = humanize([commitSetup, kitGrant], {
         manager: manager.toLowerCase(),
-        auditedActions: [auditedAction]
+        auditedActions: [auditedAction],
+        fromUserRequestId: kitRequestId
       })
       expect(lowerCaseManager.warnings).toBeUndefined()
     })
@@ -347,7 +364,13 @@ describe('privileges', () => {
           {
             ...accountOp,
             calls,
-            meta: { recoveryKit: { manager, auditedActions: [auditedAction] } }
+            meta: {
+              recoveryKit: {
+                manager,
+                auditedActions: [auditedAction],
+                fromUserRequestId: kitRequestId
+              }
+            }
           },
           executeBySelf
         )
@@ -360,8 +383,82 @@ describe('privileges', () => {
       expect(isRecoveryKitGrant({ ...accountOp, calls, meta: {} }, kitGrant)).toBe(false)
       expect(
         isRecoveryKitGrant(
-          { ...accountOp, calls, meta: { recoveryKit: { manager, auditedActions: [] } } },
+          {
+            ...accountOp,
+            calls,
+            meta: { recoveryKit: { manager, auditedActions: [], fromUserRequestId: kitRequestId } }
+          },
           kitGrant
+        )
+      ).toBe(false)
+    })
+
+    test('from another request than the marked one is shown as a danger', () => {
+      const markedRequestCall: Call = {
+        to: manager,
+        value: 0n,
+        data: '0x',
+        fromUserRequestId: kitRequestId
+      }
+      const [, , shown] = humanize([
+        markedRequestCall,
+        fromOtherRequest(commitSetup),
+        fromOtherRequest(kitGrant)
+      ])
+      expect(shown.warnings).toMatchObject([{ level: 'danger' }])
+      expect(shown.fullVisualization).not.toContainEqual(
+        expect.objectContaining({ content: 'Enable recovery module' })
+      )
+    })
+
+    test('of another audited action from another request beside the marked grant is shown as a danger', () => {
+      const otherGrant = fromOtherRequest(grant(kitSlot(unlistedAction), kitValue(unlistedAction)))
+      const [, markedGrant, shown] = humanize([commitSetup, kitGrant, otherGrant], {
+        manager,
+        auditedActions: [auditedAction, unlistedAction],
+        fromUserRequestId: kitRequestId
+      })
+      expect(markedGrant.warnings).toBeUndefined()
+      expect(shown.warnings).toMatchObject([{ level: 'danger' }])
+    })
+
+    test('with the grant and the commitSetup from different requests is shown as a danger', () => {
+      const [, grantFromMarked] = humanize([fromOtherRequest(commitSetup), kitGrant])
+      expect(grantFromMarked.warnings).toMatchObject([{ level: 'danger' }])
+      const [, grantFromOther] = humanize([commitSetup, fromOtherRequest(kitGrant)])
+      expect(grantFromOther.warnings).toMatchObject([{ level: 'danger' }])
+    })
+
+    test('is not recognised when the mark names a request no call comes from', () => {
+      const calls = [commitSetup, kitGrant]
+      expect(
+        isRecoveryKitGrant(
+          {
+            ...accountOp,
+            calls,
+            meta: {
+              recoveryKit: { manager, auditedActions: [auditedAction], fromUserRequestId: 3 }
+            }
+          },
+          kitGrant
+        )
+      ).toBe(false)
+    })
+
+    test('is not recognised from calls that carry no request id', () => {
+      const grantWithoutId: Call = { to: kitGrant.to, value: 0n, data: kitGrant.data }
+      const commitWithoutId: Call = { to: commitSetup.to, value: 0n, data: commitSetup.data }
+      const calls = [commitWithoutId, grantWithoutId]
+      expect(
+        isRecoveryKitGrant(
+          {
+            ...accountOp,
+            calls,
+            meta: {
+              recoveryKit: { manager, auditedActions: [auditedAction] }
+            } as AccountOp['meta']
+          },
+          grantWithoutId
         )
       ).toBe(false)
     })

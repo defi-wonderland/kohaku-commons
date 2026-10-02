@@ -351,15 +351,18 @@ describe('the recovery kit grant', () => {
       .slice(-40)}`
   )
   const kitValue = ethers.keccak256(abiCoder.encode(['address', 'string'], [auditedAction, '']))
-  const grant = (addr: string, priv: string) => ({
+  const kitRequestId = 1
+  const grant = (addr: string, priv: string, fromUserRequestId = kitRequestId) => ({
     to: accountOp.accountAddr,
     value: 0n,
-    data: ambireAccount.encodeFunctionData('setAddrPrivilege', [addr, priv])
+    data: ambireAccount.encodeFunctionData('setAddrPrivilege', [addr, priv]),
+    fromUserRequestId
   })
   const commitSetup = {
     to: manager,
     value: 0n,
-    data: `${ethers.id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`
+    data: `${ethers.id('commitSetup(bytes32,uint256,bytes,bytes)').slice(0, 10)}${'00'.repeat(32)}`,
+    fromUserRequestId: kitRequestId
   }
   const unrelatedCall = transactions.generic[1]
   const humanize = (calls: AccountOp['calls']): IrCall[] =>
@@ -367,7 +370,9 @@ describe('the recovery kit grant', () => {
       {
         ...accountOp,
         calls,
-        meta: { recoveryKit: { manager, auditedActions: [auditedAction] } }
+        meta: {
+          recoveryKit: { manager, auditedActions: [auditedAction], fromUserRequestId: kitRequestId }
+        }
       },
       {}
     )
@@ -389,6 +394,20 @@ describe('the recovery kit grant', () => {
       expect.objectContaining({ warning: true })
     )
     expect(kitGrant.warnings ?? []).toEqual([])
+  })
+
+  test('the same grant and commitSetup from another request keep the danger warning', () => {
+    const [, , otherGrant] = humanize([
+      { ...unrelatedCall, fromUserRequestId: kitRequestId },
+      { ...commitSetup, fromUserRequestId: 2 },
+      grant(kitSlot, kitValue, 2)
+    ])
+
+    expect(otherGrant.fullVisualization?.[0]).toMatchObject({
+      content: 'Update access status',
+      warning: true
+    })
+    expect(otherGrant.warnings).toContainEqual(expect.objectContaining({ level: 'danger' }))
   })
 
   test('a grant to an address outside the audited list keeps the warning', () => {

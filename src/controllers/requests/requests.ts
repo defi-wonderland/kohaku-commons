@@ -33,6 +33,7 @@ import { TokenResult } from '../../libs/portfolio'
 import {
   ACCOUNT_SWITCH_USER_REQUEST,
   buildSwitchAccountUserRequest,
+  getAccountOpMetaWithRecoveryKit,
   makeAccountOpAction
 } from '../../libs/requests/requests'
 import { parse } from '../../libs/richJson/richJson'
@@ -296,7 +297,10 @@ export class RequestsController extends EventEmitter {
         const signAccountOp = this.#getSignAccountOp()
         if (signAccountOp) {
           if (signAccountOp.fromActionId === accountOpAction.id) {
-            this.#updateSignAccountOp({ calls: accountOpAction.accountOp.calls })
+            this.#updateSignAccountOp({
+              calls: accountOpAction.accountOp.calls,
+              recoveryKit: accountOpAction.accountOp.meta?.recoveryKit
+            })
           }
         } else {
           // Even without an initialized SignAccountOpController or Screen, we should still update the portfolio and run the simulation.
@@ -403,13 +407,20 @@ export class RequestsController extends EventEmitter {
           meta.accountAddr,
           meta.chainId
         )
+        accountOpAction.accountOp.meta = getAccountOpMetaWithRecoveryKit(
+          accountOpAction.accountOp,
+          this.userRequests
+        )
         const signAccountOp = this.#getSignAccountOp()
 
         if (accountOpAction.accountOp.calls.length) {
           actionsToAddOrUpdate.push(accountOpAction)
 
           if (signAccountOp && signAccountOp.fromActionId === accountOpAction.id) {
-            this.#updateSignAccountOp({ calls: accountOpAction.accountOp.calls })
+            this.#updateSignAccountOp({
+              calls: accountOpAction.accountOp.calls,
+              recoveryKit: accountOpAction.accountOp.meta?.recoveryKit
+            })
           }
         } else {
           if (signAccountOp && signAccountOp.fromActionId === accountOpAction.id) {
