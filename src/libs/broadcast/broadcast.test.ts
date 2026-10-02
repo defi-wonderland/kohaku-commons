@@ -126,7 +126,7 @@ const makeKeystore = async () => {
   return keystore
 }
 
-describe('Broadcast paid by the smart account key', () => {
+describe('Broadcast by another payer accepts a key the keystore holds that is not a listed account', () => {
   test('the key the keystore holds pays for an undeployed account: it signs a deploy and execute with its own nonce', async () => {
     const keystore = await makeKeystore()
     const payerNonce = 7
