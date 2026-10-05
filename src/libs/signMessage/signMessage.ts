@@ -512,6 +512,15 @@ function canSignUnprotected(
   return BigInt(entry[1]) > BigInt(standardSigningOnlyPriv)
 }
 
+function isAccountEnvelope(message: TypedMessage, account: Account): boolean {
+  return (
+    message.primaryType === 'AmbireOperation' &&
+    message.domain.name === 'Ambire' &&
+    !!message.domain.verifyingContract &&
+    isSameAddr(message.domain.verifyingContract, account.addr)
+  )
+}
+
 export async function getPlainTextSignature(
   messageHex: PlainTextMessage['message'],
   network: Network,
@@ -635,24 +644,16 @@ export async function getEIP712Signature(
     return wrapWallet(signature, account.addr)
   }
 
-  if (canSignUnprotected(accountState, signer)) {
+  // a request from outside never obtains a signature over this account's own
+  // envelope, because that envelope is what authorises the account's
+  // operations; such an input is wrapped again like any other typed data
+  if (!isAccountEnvelope(message, account) && canSignUnprotected(accountState, signer)) {
     return wrapUnprotected(await signer.signTypedData(message))
   }
 
-  // the account rebuilds its own envelope around the signed hash, so an
-  // input that already is this account's envelope is signed as it is
-  if (
-    message.primaryType === 'AmbireOperation' &&
-    message.domain.name === 'Ambire' &&
-    !!message.domain.verifyingContract &&
-    isSameAddr(message.domain.verifyingContract, account.addr)
-  ) {
-    return wrapStandard(await signer.signTypedData(message))
-  }
-
-  // any other typed data is bound to this account by signing its digest
-  // inside the account's envelope; the account builds the envelope with
-  // the chain it runs on, so the network's chain id is used, not the domain's
+  // the typed data is bound to this account by signing its digest inside the
+  // account's envelope; the account builds the envelope with the chain it
+  // runs on, so the network's chain id is used, not the domain's
   const digest = hexlify(
     TypedDataUtils.eip712Hash(adaptTypedMessageForMetaMaskSigUtil(message), SignTypedDataVersion.V4)
   )
@@ -670,10 +671,12 @@ export async function getEntryPointAuthorization(
   return getTypedData(chainId, addr, hexlify(hash))
 }
 
-export function adjustEntryPointAuthorization(entryPointSig: string): string {
-  // since normally when we sign an EIP-712 request, we wrap it in Unprotected,
-  // we adjust the entry point authorization signature so we could execute a txn
-  return wrapStandard(entryPointSig.substring(0, entryPointSig.length - 2))
+// sign the envelope the wallet built for the first ERC-4337 deploy txn
+export async function getEntryPointAuthorizationSignature(
+  entryPointAuthorization: TypedMessage,
+  signer: KeystoreSignerInterface
+): Promise<string> {
+  return wrapStandard(await signer.signTypedData(entryPointAuthorization))
 }
 
 // the hash the user needs to eth_sign in order for his EOA to turn smarter
