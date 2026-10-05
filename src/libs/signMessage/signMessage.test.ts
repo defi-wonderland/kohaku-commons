@@ -634,8 +634,9 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: true ', () => {
       signer,
       polygonNetwork
     )
-    // the key should be dedicatedToOneSA, so we expect the signature to end in 00
-    expect(eip712Sig.slice(-2)).toEqual('00')
+    // the account's own envelope is never signed as it is, even by a dedicated key,
+    // so it is wrapped again and the signature ends in 01
+    expect(eip712Sig.slice(-2)).toEqual('01')
 
     const provider = getRpcProvider(polygonNetwork)
     const res = await verifyMessage({
@@ -804,7 +805,7 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: true ', () => {
       signer,
       polygonNetwork
     )
-    expect(eip712Sig.slice(-2)).toEqual('00')
+    expect(eip712Sig.slice(-2)).toEqual('01')
 
     const provider = getRpcProvider(polygonNetwork)
     const wrappedSig = wrapWallet(eip712Sig, smartAccount.addr)
@@ -986,7 +987,17 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: false', () => {
 
     const provider = getRpcProvider(polygonNetwork)
     const contract = new Contract(smartAccount.addr, AmbireAccount.abi, provider)
-    const isValidSig = await contract.isValidSignature(hashMessage('test'), eip712Sig)
+    // the signature holds for the digest of the typed data, never for the
+    // inner hash of the account's envelope
+    const isValidSig = await contract.isValidSignature(
+      TypedDataUtils.eip712Hash(
+        adaptTypedMessageForMetaMaskSigUtil(typedData),
+        SignTypedDataVersion.V4
+      ),
+      eip712Sig
+    )
     expect(isValidSig).toBe(contractSuccess)
+    const isValidForInnerHash = await contract.isValidSignature(hashMessage('test'), eip712Sig)
+    expect(isValidForInnerHash).not.toBe(contractSuccess)
   })
 })
