@@ -964,7 +964,7 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: false', () => {
     })
     expect(res).toBe(true)
   })
-  test('Signing [Not dedicated to one SA]: eip-712, should throw an error', async () => {
+  test('Signing [Not dedicated to one SA]: eip-712', async () => {
     const accountStates = await getAccountsInfo([smartAccount])
     const accountState = accountStates[smartAccount.addr][polygonNetwork.chainId.toString()]
     const signer = await keystore.getSigner(eoaSigner.keyPublicAddress, 'internal')
@@ -974,14 +974,19 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: false', () => {
       accountState.accountAddr,
       hashMessage('test')
     )
-    try {
-      await getEIP712Signature(typedData, smartAccount, accountState, signer, polygonNetwork)
-      console.log('No error was thrown for [Not dedicated to one SA]: eip-712, but it should have')
-      expect(true).toEqual(false)
-    } catch (e: any) {
-      expect(e.message).toBe(
-        `Signer with address ${signer.key.addr} does not have privileges to execute this operation. Please choose a different signer and try again`
-      )
-    }
+    const eip712Sig = await getEIP712Signature(
+      typedData,
+      smartAccount,
+      accountState,
+      signer,
+      polygonNetwork
+    )
+    // the key should not be dedicatedToOneSA, so we expect the signature to end in 01
+    expect(eip712Sig.slice(-2)).toEqual('01')
+
+    const provider = getRpcProvider(polygonNetwork)
+    const contract = new Contract(smartAccount.addr, AmbireAccount.abi, provider)
+    const isValidSig = await contract.isValidSignature(hashMessage('test'), eip712Sig)
+    expect(isValidSig).toBe(contractSuccess)
   })
 })
