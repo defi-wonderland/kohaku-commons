@@ -112,7 +112,9 @@ const isValidSignature = (
   return privilegeOf(privileges, recovered.signer) > (recovered.unprotected ? 1n : 0n)
 }
 
-// execute and validateUserOp: any mode, the signer's privilege above 0
+// operation acceptance: any ECDSA mode with the signer's privilege above 0, a
+// superset of what the deployed account accepts in execute and
+// validateUserOp, so a refusal here is a refusal on chain
 const authorisesOperation = (
   privileges: Record<string, bigint>,
   chainId: bigint,
@@ -486,6 +488,7 @@ describe("the account's own envelope sent as a request", () => {
 
     const signature = await signTyped(otherEnvelope, makeSigner(true), stateWithPrivilege(2n))
 
+    expect(ecrecover(otherEnvelopeDigest, getBytes(signature).slice(0, 65))).not.toBe(keyAddr)
     ecdsaModes.forEach((mode) => {
       const swapped = withMode(signature, mode)
       const hashes = [otherInnerHash, otherEnvelopeDigest]
