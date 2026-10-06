@@ -340,6 +340,38 @@ export class AccountPickerController extends EventEmitter {
       })
     }
 
+    // On a newly created seed the wallet adds the key that controls the
+    // slot's smart account as an account of its own, so the key is listed
+    // right after the smart accounts. It keeps its derivation index, because
+    // its private key is derived from that index.
+    if (this.shouldSelectSmartAccountAutomatically) {
+      const smartAccountKeys = accountsWithStatus
+        .filter(({ account, isLinked }) => isSmartAccount(account) && !isLinked)
+        .flatMap(({ slot }) => {
+          const key = this.#derivedAccounts.find(
+            (a) =>
+              a.slot === slot &&
+              !isSmartAccount(a.account) &&
+              isDerivedForSmartAccountKeyOnly(a.index)
+          )
+          return key ? [key] : []
+        })
+      const accountsWithKeys = [...mergedAccounts, ...smartAccountKeys]
+
+      smartAccountKeys.forEach((key) => {
+        accountsWithStatus.push({
+          ...key,
+          importStatus: getAccountImportStatus({
+            account: key.account,
+            alreadyImportedAccounts: this.#alreadyImportedAccounts,
+            keys: this.#keystore.keys,
+            accountsOnPage: accountsWithKeys,
+            keyIteratorType: this.keyIterator?.type
+          })
+        })
+      })
+    }
+
     return accountsWithStatus
   }
 
@@ -986,27 +1018,34 @@ export class AccountPickerController extends EventEmitter {
         })
       }
 
+      // On a newly created seed the slot's smart account is the first account
+      // to add, and the key that controls it follows; the slot's ordinary
+      // basic account stays unselected. With the flag off, every import picks
+      // the next basic account.
       const nextAccountOnPage = this.accountsOnPage.find(
         ({ isLinked, account, importStatus }) =>
           importStatus !== ImportStatus.ImportedWithTheSameKeys &&
           !isLinked &&
-          !isSmartAccount(account)
+          isSmartAccount(account) === this.shouldSelectSmartAccountAutomatically
       )
       nextAccount = nextAccountOnPage?.account
 
       if (nextAccountOnPage) {
         this.selectAccount(nextAccountOnPage.account)
 
+        // The key that controls the smart account is added with it, after it.
         if (this.shouldSelectSmartAccountAutomatically) {
-          const smartAccountOnTheSameSlot = this.accountsOnPage.find(
-            ({ isLinked, account, importStatus, slot }) =>
+          const keyOnTheSameSlot = this.accountsOnPage.find(
+            ({ account, index, slot }) =>
               slot === nextAccountOnPage.slot &&
-              importStatus !== ImportStatus.ImportedWithTheSameKeys &&
-              !isLinked &&
-              isSmartAccount(account)
+              !isSmartAccount(account) &&
+              isDerivedForSmartAccountKeyOnly(index)
           )
-          if (smartAccountOnTheSameSlot) {
-            this.selectAccount(smartAccountOnTheSameSlot.account)
+          if (
+            keyOnTheSameSlot &&
+            keyOnTheSameSlot.importStatus !== ImportStatus.ImportedWithTheSameKeys
+          ) {
+            this.selectAccount(keyOnTheSameSlot.account)
           }
         }
         break
