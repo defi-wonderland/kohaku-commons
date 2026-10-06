@@ -1018,9 +1018,10 @@ export class AccountPickerController extends EventEmitter {
         })
       }
 
-      // On a newly created seed the slot's smart account is the account to add,
-      // alone: its key comes with it, and the slot's ordinary basic account
-      // stays unselected. Every import picks the next basic account.
+      // On a newly created seed the slot's smart account is the first account
+      // to add, and the key that controls it follows; the slot's ordinary
+      // basic account stays unselected. Every import picks the next basic
+      // account.
       const nextAccountOnPage = this.accountsOnPage.find(
         ({ isLinked, account, importStatus }) =>
           importStatus !== ImportStatus.ImportedWithTheSameKeys &&
