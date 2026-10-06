@@ -634,7 +634,7 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: true ', () => {
       signer,
       polygonNetwork
     )
-    // the account's own envelope is never signed as it is, even by a dedicated key,
+    // an AmbireOperation input is never signed as it is, even by a dedicated key,
     // so it is wrapped again and the signature ends in 01
     expect(eip712Sig.slice(-2)).toEqual('01')
 
@@ -982,7 +982,7 @@ describe('Sign Message, Keystore with key dedicatedToOneSA: false', () => {
       signer,
       polygonNetwork
     )
-    // the key should not be dedicatedToOneSA, so we expect the signature to end in 01
+    // an AmbireOperation input is wrapped again for every key, so the signature ends in 01
     expect(eip712Sig.slice(-2)).toEqual('01')
 
     const provider = getRpcProvider(polygonNetwork)
