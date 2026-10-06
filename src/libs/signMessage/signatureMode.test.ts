@@ -13,7 +13,8 @@ import {
   ZeroHash
 } from 'ethers'
 
-import { describe, expect, test } from '@jest/globals'
+import { describe, expect, jest, test } from '@jest/globals'
+import { SignTypedDataVersion, TypedDataUtils } from '@metamask/eth-sig-util'
 
 import { networks } from '../../consts/networks'
 import { Account, AccountOnchainState } from '../../interfaces/account'
@@ -24,6 +25,7 @@ import { callToTuple } from '../accountOp/accountOp'
 import { KeystoreSigner } from '../keystoreSigner/keystoreSigner'
 import { getActivatorCall } from '../userOperation/userOperation'
 import {
+  adaptTypedMessageForMetaMaskSigUtil,
   getAmbireReadableTypedData,
   getEIP712Signature,
   getEntryPointAuthorization,
@@ -434,26 +436,173 @@ describe("the account's own envelope sent as a request", () => {
     })
   })
 
-  test('an envelope naming another account is ordinary typed data for a dedicated key above the standard-signing value', async () => {
-    const foreignEnvelope = getTypedData(polygon.chainId, otherAccountAddr, innerHash)
-    const signature = await signTyped(foreignEnvelope, makeSigner(true), stateWithPrivilege(2n))
-
-    expect(modeOf(signature)).toBe('00')
+  test('an envelope whose domain name is a number spelling the same bytes is wrapped again', async () => {
+    const numericName = getTypedData(polygon.chainId, accountAddr, innerHash)
+    numericName.domain = {
+      ...numericName.domain,
+      name: 71938058318437 as unknown as string
+    }
+    // the signing library hashes the number as the bytes of "Ambire", so its
+    // digest is the account's own envelope digest
     expect(
-      recoverAsAccount(polygon.chainId, accountAddr, typedDigest(foreignEnvelope), signature)
-        ?.signer
-    ).toBe(keyAddr)
-    // it authorises nothing on this account, under either mode byte
-    ecdsaModes.forEach((mode) => {
-      expect(
-        authorisesOperation(
-          { [keyAddr]: 2n },
-          polygon.chainId,
-          accountAddr,
-          innerHash,
-          withMode(signature, mode)
+      hexlify(
+        TypedDataUtils.eip712Hash(
+          adaptTypedMessageForMetaMaskSigUtil(numericName),
+          SignTypedDataVersion.V4
         )
+      )
+    ).toBe(ownEnvelopeDigest)
+
+    const chainPrivileges = { [keyAddr]: 2n }
+    const signature = await signTyped(numericName, makeSigner(true), stateWithPrivilege(2n))
+
+    expect(ecrecover(ownEnvelopeDigest, getBytes(signature).slice(0, 65))).not.toBe(keyAddr)
+    ecdsaModes.forEach((mode) => {
+      const swapped = withMode(signature, mode)
+      expect(
+        isValidSignature(chainPrivileges, polygon.chainId, accountAddr, innerHash, swapped)
       ).toBe(false)
+      expect(
+        authorisesOperation(chainPrivileges, polygon.chainId, accountAddr, innerHash, swapped)
+      ).toBe(false)
+    })
+    expect(
+      isValidSignature(
+        chainPrivileges,
+        polygon.chainId,
+        accountAddr,
+        ownEnvelopeDigest,
+        withMode(signature, '00')
+      )
+    ).toBe(false)
+    expect(modeOf(signature)).toBe('01')
+  })
+
+  test("another account's envelope is wrapped again, so it authorises nothing on that account where the key also holds a privilege", async () => {
+    const otherInnerHash = operationHash(otherAccountAddr, polygon.chainId, 0n, calls)
+    const otherEnvelope = getTypedData(polygon.chainId, otherAccountAddr, otherInnerHash)
+    const otherEnvelopeDigest = typedDigest(otherEnvelope)
+    const otherPrivileges = { [keyAddr]: 1n }
+
+    const signature = await signTyped(otherEnvelope, makeSigner(true), stateWithPrivilege(2n))
+
+    ecdsaModes.forEach((mode) => {
+      const swapped = withMode(signature, mode)
+      const hashes = [otherInnerHash, otherEnvelopeDigest]
+      hashes.forEach((hash) => {
+        expect(
+          isValidSignature(otherPrivileges, polygon.chainId, otherAccountAddr, hash, swapped)
+        ).toBe(false)
+        expect(
+          authorisesOperation(otherPrivileges, polygon.chainId, otherAccountAddr, hash, swapped)
+        ).toBe(false)
+      })
+    })
+    expect(modeOf(signature)).toBe('01')
+  })
+})
+
+describe('the account operation types sent as a request', () => {
+  const transactionType = [
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'data', type: 'bytes' }
+  ]
+  const domainType = [
+    { name: 'name', type: 'string' },
+    { name: 'version', type: 'string' },
+    { name: 'chainId', type: 'uint256' },
+    { name: 'verifyingContract', type: 'address' },
+    { name: 'salt', type: 'bytes32' }
+  ]
+  const domain = {
+    name: 'Ambire',
+    version: '1',
+    chainId: polygon.chainId.toString(),
+    verifyingContract: accountAddr,
+    salt: ZeroHash
+  }
+  const call = { to: spenderAddr, value: '1000000000000000000', data: '0x' }
+
+  const executeOp: TypedMessage = {
+    kind: 'typedMessage',
+    domain,
+    types: {
+      EIP712Domain: domainType,
+      Transaction: transactionType,
+      AmbireExecuteAccountOp: [
+        { name: 'account', type: 'address' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'calls', type: 'Transaction[]' },
+        { name: 'hash', type: 'bytes32' }
+      ]
+    },
+    message: {
+      account: accountAddr,
+      chainId: polygon.chainId.toString(),
+      nonce: '0',
+      calls: [call],
+      hash: operationHash(accountAddr, polygon.chainId, 0n, [[call.to, call.value, call.data]])
+    },
+    primaryType: 'AmbireExecuteAccountOp'
+  }
+
+  const userOp: TypedMessage = {
+    kind: 'typedMessage',
+    domain,
+    types: {
+      EIP712Domain: domainType,
+      Transaction: transactionType,
+      Ambire4337AccountOp: [
+        { name: 'account', type: 'address' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'initCode', type: 'bytes' },
+        { name: 'accountGasLimits', type: 'bytes32' },
+        { name: 'preVerificationGas', type: 'uint256' },
+        { name: 'gasFees', type: 'bytes32' },
+        { name: 'paymasterAndData', type: 'bytes' },
+        { name: 'callData', type: 'bytes' },
+        { name: 'calls', type: 'Transaction[]' },
+        { name: 'hash', type: 'bytes32' }
+      ]
+    },
+    message: {
+      account: accountAddr,
+      chainId: polygon.chainId.toString(),
+      nonce: '0',
+      initCode: '0x',
+      accountGasLimits: ZeroHash,
+      preVerificationGas: '0',
+      gasFees: ZeroHash,
+      paymasterAndData: '0x',
+      callData: '0x',
+      calls: [call],
+      hash: ZeroHash
+    },
+    primaryType: 'Ambire4337AccountOp'
+  }
+
+  const messages: TypedMessage[] = [executeOp, userOp]
+  const signers: [string, boolean, bigint][] = [
+    ['a dedicated key above the standard-signing value', true, 2n],
+    ['a dedicated key at the standard-signing value', true, 1n],
+    ['a key not dedicated to one account at the standard-signing value', false, 1n]
+  ]
+  messages.forEach((message) => {
+    signers.forEach(([label, dedicatedToOneSA, privilege]) => {
+      test(`${label} is refused an ${String(message.primaryType)} and signs nothing`, async () => {
+        const signer = makeSigner(dedicatedToOneSA)
+        const signTypedData = jest.spyOn(signer, 'signTypedData')
+        const signMessage = jest.spyOn(signer, 'signMessage')
+
+        await expect(signTyped(message, signer, stateWithPrivilege(privilege))).rejects.toThrow(
+          'Ambire account operation'
+        )
+        expect(signTypedData).not.toHaveBeenCalled()
+        expect(signMessage).not.toHaveBeenCalled()
+      })
     })
   })
 })
@@ -469,9 +618,10 @@ describe('the wallet authorising the entry point on the first ERC-4337 operation
   ]
   signers.forEach(([label, dedicatedToOneSA, privilege]) => {
     test(`${label} gives a standard signature that authorises the activation`, async () => {
-      const authorization = await getEntryPointAuthorization(accountAddr, polygon.chainId, nonce)
       const signature = await getEntryPointAuthorizationSignature(
-        authorization,
+        accountAddr,
+        polygon.chainId,
+        nonce,
         makeSigner(dedicatedToOneSA)
       )
 
@@ -491,12 +641,14 @@ describe('the wallet authorising the entry point on the first ERC-4337 operation
     })
   })
 
-  test('the signature is the raw envelope signature with the standard mode byte', async () => {
+  test('for a dedicated key above the standard-signing value, the bytes equal a raw unprotected signature of the envelope with its last byte made standard', async () => {
     const authorization = await getEntryPointAuthorization(accountAddr, polygon.chainId, nonce)
     const signer = makeSigner(true)
-    const raw = await signer.signTypedData(authorization)
+    const rawUnprotected = `${await signer.signTypedData(authorization)}00`
 
-    expect(await getEntryPointAuthorizationSignature(authorization, signer)).toBe(`${raw}01`)
+    expect(
+      await getEntryPointAuthorizationSignature(accountAddr, polygon.chainId, nonce, signer)
+    ).toBe(withMode(rawUnprotected, '01'))
   })
 })
 
