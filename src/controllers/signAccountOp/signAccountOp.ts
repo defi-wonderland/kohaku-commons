@@ -72,7 +72,6 @@ import {
   get7702Sig,
   get7702UserOpTypedData,
   getAuthorizationHash,
-  getEntryPointAuthorization,
   getEntryPointAuthorizationSignature,
   getExecuteSignature,
   getTypedData,
@@ -1891,14 +1890,11 @@ export class SignAccountOpController extends EventEmitter {
         }
 
         if (shouldSignDeployAuth) {
-          const epActivatorTypedData = await getEntryPointAuthorization(
-            this.account.addr,
-            this.#network.chainId,
-            accountState.nonce
-          )
           if (!this.accountOp.meta) this.accountOp.meta = {}
           this.accountOp.meta.entryPointAuthorization = await getEntryPointAuthorizationSignature(
-            epActivatorTypedData,
+            this.account.addr,
+            this.#network.chainId,
+            accountState.nonce,
             signer
           )
 

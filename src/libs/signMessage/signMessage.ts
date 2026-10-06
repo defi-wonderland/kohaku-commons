@@ -512,12 +512,14 @@ function canSignUnprotected(
   return BigInt(entry[1]) > BigInt(standardSigningOnlyPriv)
 }
 
-function isAccountEnvelope(message: TypedMessage, account: Account): boolean {
+function isAmbireOperation(message: TypedMessage): boolean {
+  return message.primaryType === 'AmbireOperation'
+}
+
+function isAmbireAccountOperation(message: TypedMessage): boolean {
   return (
-    message.primaryType === 'AmbireOperation' &&
-    message.domain.name === 'Ambire' &&
-    !!message.domain.verifyingContract &&
-    isSameAddr(message.domain.verifyingContract, account.addr)
+    message.primaryType === 'AmbireExecuteAccountOp' ||
+    message.primaryType === 'Ambire4337AccountOp'
   )
 }
 
@@ -644,10 +646,18 @@ export async function getEIP712Signature(
     return wrapWallet(signature, account.addr)
   }
 
-  // a request from outside never obtains a signature over this account's own
-  // envelope, because that envelope is what authorises the account's
-  // operations; such an input is wrapped again like any other typed data
-  if (!isAccountEnvelope(message, account) && canSignUnprotected(accountState, signer)) {
+  // the account's own operation types authorise its calls directly, and no
+  // request from outside has a reason to send them
+  if (isAmbireAccountOperation(message)) {
+    throw new Error(
+      'Signing this eip-712 message is disallowed as it is an Ambire account operation. Please contact support'
+    )
+  }
+
+  // a raw signature over any AmbireOperation, whatever its domain, becomes by
+  // its last byte a standard signature over the inner hash on every account
+  // where the key holds a privilege, so such an input is always wrapped again
+  if (!isAmbireOperation(message) && canSignUnprotected(accountState, signer)) {
     return wrapUnprotected(await signer.signTypedData(message))
   }
 
@@ -671,11 +681,15 @@ export async function getEntryPointAuthorization(
   return getTypedData(chainId, addr, hexlify(hash))
 }
 
-// sign the envelope the wallet built for the first ERC-4337 deploy txn
+// sign the authorization for the first ERC-4337 deploy txn; the envelope is
+// built here so that none can come from outside
 export async function getEntryPointAuthorizationSignature(
-  entryPointAuthorization: TypedMessage,
+  addr: AccountId,
+  chainId: bigint,
+  nonce: bigint,
   signer: KeystoreSignerInterface
 ): Promise<string> {
+  const entryPointAuthorization = await getEntryPointAuthorization(addr, chainId, nonce)
   return wrapStandard(await signer.signTypedData(entryPointAuthorization))
 }
 
