@@ -351,7 +351,7 @@ describe('AccountPicker', () => {
       shouldSelectSmartAccountAutomatically: true
     })
 
-    test('should select the smart account of the next slot and then its controlling key', async () => {
+    test('selects the smart account of the next slot and then its controlling key', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       accountPicker.setInitParams(createFlowParams(seed))
       await accountPicker.init()
@@ -373,7 +373,7 @@ describe('AccountPicker', () => {
       )
     })
 
-    test('should hand the keystore only the controlling key, marked as dedicated to one smart account', async () => {
+    test('hands the keystore only the controlling key, marked as dedicated to one smart account', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       accountPicker.setInitParams(createFlowParams(seed))
       await accountPicker.init()
@@ -389,7 +389,7 @@ describe('AccountPicker', () => {
       expect(keys.every(({ dedicatedToOneSA }) => dedicatedToOneSA === true)).toBe(true)
     })
 
-    test('should list the controlling key once, right after its smart account, outside the basic slots', async () => {
+    test('lists the controlling key once, right after its smart account, outside the basic slots', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       accountPicker.setInitParams(createFlowParams(seed))
       await accountPicker.init()
@@ -416,7 +416,7 @@ describe('AccountPicker', () => {
       expect(basicSlots.map((a) => a.account.addr)).not.toContain(keyAddr)
     })
 
-    test('should keep the smart account selected, still controlled by its key, when the key is deselected', async () => {
+    test('keeps the smart account selected, still controlled by its key, when the key is deselected', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       accountPicker.setInitParams(createFlowParams(seed))
       await accountPicker.init()
@@ -434,7 +434,7 @@ describe('AccountPicker', () => {
       ])
     })
 
-    test('should not select the controlling key again when it is already imported with the same key', async () => {
+    test('does not select the controlling key again when it is already imported with the same key', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       const keyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
       const picker = pickerWithImported(
@@ -458,7 +458,7 @@ describe('AccountPicker', () => {
       expect(picker.selectedAccounts.filter((a) => a.account.addr === keyAddr)).toHaveLength(1)
     })
 
-    test('should select the smart account of the first slot and its key when only its ordinary basic account is imported', async () => {
+    test('selects the smart account of the first slot and its key when only its ordinary basic account is imported', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       const importedBasicAccAddr = addressAt(seed, 0)
       const keyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
@@ -488,7 +488,7 @@ describe('AccountPicker', () => {
       expect(picker.pageSize).toBe(2)
     })
 
-    test('should select the smart account of the next slot and its key when a larger page starts with an imported smart account', async () => {
+    test('selects the smart account of the next slot and its key when a larger page starts with an imported smart account', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       const importedKeyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
       const importedSmartAcc = await getSmartAccount(
@@ -523,7 +523,7 @@ describe('AccountPicker', () => {
       expect(picker.pageSize).toBe(2)
     })
 
-    test('should select the smart account of the first slot of the current page and its key when the page is not the first', async () => {
+    test('selects the smart account of the first slot of the current page and its key when the page is not the first', async () => {
       const seed = Wallet.createRandom().mnemonic!.phrase
       accountPicker.setInitParams({ ...createFlowParams(seed), page: 2, pageSize: 2 })
       await accountPicker.init()
@@ -546,7 +546,7 @@ describe('AccountPicker', () => {
     })
   })
 
-  test('should select only the basic account of the next slot when importing a seed', async () => {
+  test('selects only the basic account of the next slot when importing a seed', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
     const keyIterator = new KeyIterator(seed)
     accountPicker.setInitParams({
@@ -584,7 +584,7 @@ describe('AccountPicker', () => {
     ).toHaveLength(0)
   })
 
-  test('should refuse to select the key of a smart account when importing a seed', async () => {
+  test('refuses to select the key of a smart account when importing a seed', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
     accountPicker.setInitParams({
       keyIterator: new KeyIterator(seed),
