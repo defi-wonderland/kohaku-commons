@@ -986,29 +986,19 @@ export class AccountPickerController extends EventEmitter {
         })
       }
 
+      // On a newly created seed the slot's smart account is the account to add,
+      // alone: its key comes with it, and the slot's ordinary basic account
+      // stays unselected. Every import picks the next basic account.
       const nextAccountOnPage = this.accountsOnPage.find(
         ({ isLinked, account, importStatus }) =>
           importStatus !== ImportStatus.ImportedWithTheSameKeys &&
           !isLinked &&
-          !isSmartAccount(account)
+          isSmartAccount(account) === this.shouldSelectSmartAccountAutomatically
       )
       nextAccount = nextAccountOnPage?.account
 
       if (nextAccountOnPage) {
         this.selectAccount(nextAccountOnPage.account)
-
-        if (this.shouldSelectSmartAccountAutomatically) {
-          const smartAccountOnTheSameSlot = this.accountsOnPage.find(
-            ({ isLinked, account, importStatus, slot }) =>
-              slot === nextAccountOnPage.slot &&
-              importStatus !== ImportStatus.ImportedWithTheSameKeys &&
-              !isLinked &&
-              isSmartAccount(account)
-          )
-          if (smartAccountOnTheSameSlot) {
-            this.selectAccount(smartAccountOnTheSameSlot.account)
-          }
-        }
         break
       }
 

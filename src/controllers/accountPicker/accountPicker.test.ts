@@ -17,8 +17,9 @@ import {
 } from '../../consts/derivation'
 import { networks } from '../../consts/networks'
 import { Account } from '../../interfaces/account'
+import { dedicatedToOneSAPriv } from '../../interfaces/keystore'
 import { Storage } from '../../interfaces/storage'
-import { getBasicAccount, isSmartAccount } from '../../libs/account/account'
+import { getBasicAccount, getSmartAccount, isSmartAccount } from '../../libs/account/account'
 import { getPrivateKeyFromSeed, KeyIterator } from '../../libs/keyIterator/keyIterator'
 import { getRpcProvider } from '../../services/provider'
 import { AccountsController } from '../accounts/accounts'
@@ -316,11 +317,10 @@ describe('AccountPicker', () => {
       })
   })
 
-  test('should select the smart account of the next slot beside its basic account on a newly created seed', async () => {
+  test('should select the smart account of the next slot alone on a newly created seed', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
-    const keyIterator = new KeyIterator(seed)
     accountPicker.setInitParams({
-      keyIterator,
+      keyIterator: new KeyIterator(seed),
       hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
       shouldSearchForLinkedAccounts: false,
       shouldGetAccountsUsedOnNetworks: false,
@@ -330,9 +330,6 @@ describe('AccountPicker', () => {
     await accountPicker.init()
     await accountPicker.selectNextAccount()
 
-    const basicAccAddr = new Wallet(
-      getPrivateKeyFromSeed(seed, null, 0, BIP44_STANDARD_DERIVATION_TEMPLATE)
-    ).address
     const smartAccKeyAddr = new Wallet(
       getPrivateKeyFromSeed(
         seed,
@@ -342,21 +339,69 @@ describe('AccountPicker', () => {
       )
     ).address
 
-    const selectedSmartAccounts = accountPicker.selectedAccounts.filter((a) =>
-      isSmartAccount(a.account)
-    )
-    expect(selectedSmartAccounts).toHaveLength(1)
-    expect(selectedSmartAccounts[0].accountKeys).toEqual([
+    expect(accountPicker.selectedAccounts).toHaveLength(1)
+    expect(isSmartAccount(accountPicker.selectedAccounts[0].account)).toBe(true)
+    expect(accountPicker.selectedAccounts[0].accountKeys).toEqual([
       { addr: smartAccKeyAddr, index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET, slot: 1 }
     ])
-    expect(
-      accountPicker.selectedAccounts
-        .filter((a) => !isSmartAccount(a.account))
-        .map((a) => a.account.addr)
-    ).toEqual([basicAccAddr])
   })
 
-  test('should select the smart account of the next slot when a larger page starts with an imported slot', async () => {
+  test('should hand the keystore the key of the smart account it selects on a newly created seed, and no other key', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    accountPicker.setInitParams({
+      keyIterator: new KeyIterator(seed),
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: true
+    })
+    await accountPicker.init()
+    await accountPicker.selectNextAccount()
+
+    const smartAccKeyAddr = new Wallet(
+      getPrivateKeyFromSeed(
+        seed,
+        null,
+        SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+        BIP44_STANDARD_DERIVATION_TEMPLATE
+      )
+    ).address
+
+    const keys = accountPicker.retrieveInternalKeysOfSelectedAccounts()
+    expect(keys.map(({ addr, dedicatedToOneSA }) => ({ addr, dedicatedToOneSA }))).toEqual([
+      { addr: smartAccKeyAddr, dedicatedToOneSA: true }
+    ])
+  })
+
+  test('should keep the key of the smart account out of the accounts on page on a newly created seed', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    accountPicker.setInitParams({
+      keyIterator: new KeyIterator(seed),
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: true
+    })
+    await accountPicker.init()
+    await accountPicker.selectNextAccount()
+
+    const smartAccKeyAddr = new Wallet(
+      getPrivateKeyFromSeed(
+        seed,
+        null,
+        SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+        BIP44_STANDARD_DERIVATION_TEMPLATE
+      )
+    ).address
+
+    expect(accountPicker.accountsOnPage.map((a) => a.account.addr)).not.toContain(
+      smartAccKeyAddr
+    )
+  })
+
+  test('should select the smart account of the first slot when only its ordinary basic account is imported', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
     const addrAt = (index: number) =>
       new Wallet(getPrivateKeyFromSeed(seed, null, index, BIP44_STANDARD_DERIVATION_TEMPLATE))
@@ -394,14 +439,71 @@ describe('AccountPicker', () => {
     expect(selectedSmartAccounts).toHaveLength(1)
     expect(selectedSmartAccounts[0].accountKeys).toEqual([
       {
+        addr: addrAt(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET),
+        index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+        slot: 1
+      }
+    ])
+    // The basic account stays selected from its earlier import; no other basic
+    // account joins it.
+    expect(
+      picker.selectedAccounts.filter((a) => !isSmartAccount(a.account)).map((a) => a.account.addr)
+    ).toEqual([importedBasicAccAddr])
+    expect(picker.page).toBe(1)
+    expect(picker.pageSize).toBe(2)
+  })
+
+  test('should select the smart account of the next slot when a larger page starts with an imported smart account', async () => {
+    const seed = Wallet.createRandom().mnemonic!.phrase
+    const addrAt = (index: number) =>
+      new Wallet(getPrivateKeyFromSeed(seed, null, index, BIP44_STANDARD_DERIVATION_TEMPLATE))
+        .address
+    const importedKeyAddr = addrAt(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
+    const importedSmartAcc = await getSmartAccount(
+      [{ addr: importedKeyAddr, hash: dedicatedToOneSAPriv }],
+      []
+    )
+    const picker = new AccountPickerController({
+      accounts: {
+        accounts: [importedSmartAcc],
+        onUpdate: () => () => {}
+      } as unknown as AccountsController,
+      keystore: {
+        keys: [{ addr: importedKeyAddr, type: 'internal', dedicatedToOneSA: true }],
+        onUpdate: () => () => {}
+      } as unknown as KeystoreController,
+      networks: networksCtrl,
+      providers: providersCtrl,
+      relayerUrl,
+      fetch,
+      externalSignerControllers: {},
+      onAddAccountsSuccessCallback: () => Promise.resolve()
+    })
+    picker.setInitParams({
+      keyIterator: new KeyIterator(seed),
+      hdPathTemplate: BIP44_STANDARD_DERIVATION_TEMPLATE,
+      pageSize: 2,
+      shouldSearchForLinkedAccounts: false,
+      shouldGetAccountsUsedOnNetworks: false,
+      shouldAddNextAccountAutomatically: false,
+      shouldSelectSmartAccountAutomatically: true
+    })
+    await picker.init()
+    await picker.selectNextAccount()
+
+    const newlySelected = picker.selectedAccounts.filter(
+      (a) => a.account.addr !== importedSmartAcc.addr
+    )
+    expect(newlySelected).toHaveLength(1)
+    expect(isSmartAccount(newlySelected[0].account)).toBe(true)
+    expect(newlySelected[0].accountKeys).toEqual([
+      {
         addr: addrAt(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1),
         index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1,
         slot: 2
       }
     ])
-    expect(
-      picker.selectedAccounts.filter((a) => !isSmartAccount(a.account)).map((a) => a.account.addr)
-    ).toEqual([importedBasicAccAddr, addrAt(1)])
+    expect(picker.selectedAccounts.filter((a) => !isSmartAccount(a.account))).toHaveLength(0)
     expect(picker.page).toBe(1)
     expect(picker.pageSize).toBe(2)
   })
@@ -424,22 +526,15 @@ describe('AccountPicker', () => {
     await accountPicker.init()
     await accountPicker.selectNextAccount()
 
-    const selectedSmartAccounts = accountPicker.selectedAccounts.filter((a) =>
-      isSmartAccount(a.account)
-    )
-    expect(selectedSmartAccounts).toHaveLength(1)
-    expect(selectedSmartAccounts[0].accountKeys).toEqual([
+    expect(accountPicker.selectedAccounts).toHaveLength(1)
+    expect(isSmartAccount(accountPicker.selectedAccounts[0].account)).toBe(true)
+    expect(accountPicker.selectedAccounts[0].accountKeys).toEqual([
       {
         addr: addrAt(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 2),
         index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 2,
         slot: 3
       }
     ])
-    expect(
-      accountPicker.selectedAccounts
-        .filter((a) => !isSmartAccount(a.account))
-        .map((a) => a.account.addr)
-    ).toEqual([addrAt(2)])
     expect(accountPicker.page).toBe(2)
     expect(accountPicker.pageSize).toBe(2)
   })
@@ -464,6 +559,22 @@ describe('AccountPicker', () => {
 
     expect(accountPicker.selectedAccounts.filter((a) => isSmartAccount(a.account))).toHaveLength(0)
     expect(accountPicker.selectedAccounts.map((a) => a.account.addr)).toEqual([basicAccAddr])
+
+    const smartAccKeyAddrs = Array.from(
+      { length: accountPicker.pageSize },
+      (_, i) =>
+        new Wallet(
+          getPrivateKeyFromSeed(
+            seed,
+            null,
+            i + SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+            BIP44_STANDARD_DERIVATION_TEMPLATE
+          )
+        ).address
+    )
+    expect(
+      accountPicker.accountsOnPage.filter((a) => smartAccKeyAddrs.includes(a.account.addr))
+    ).toHaveLength(0)
   })
 
   DERIVATION_OPTIONS.forEach(({ label, value }) => {
