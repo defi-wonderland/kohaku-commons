@@ -340,6 +340,38 @@ export class AccountPickerController extends EventEmitter {
       })
     }
 
+    // On a newly created seed the wallet adds the key that controls the
+    // slot's smart account as an account of its own, so the key is listed
+    // right after the smart accounts. It keeps its derivation index, because
+    // its private key is derived from that index.
+    if (this.shouldSelectSmartAccountAutomatically) {
+      const smartAccountKeys = accountsWithStatus
+        .filter(({ account, isLinked }) => isSmartAccount(account) && !isLinked)
+        .flatMap(({ slot }) => {
+          const key = this.#derivedAccounts.find(
+            (a) =>
+              a.slot === slot &&
+              !isSmartAccount(a.account) &&
+              isDerivedForSmartAccountKeyOnly(a.index)
+          )
+          return key ? [key] : []
+        })
+      const accountsWithKeys = [...mergedAccounts, ...smartAccountKeys]
+
+      smartAccountKeys.forEach((key) => {
+        accountsWithStatus.push({
+          ...key,
+          importStatus: getAccountImportStatus({
+            account: key.account,
+            alreadyImportedAccounts: this.#alreadyImportedAccounts,
+            keys: this.#keystore.keys,
+            accountsOnPage: accountsWithKeys,
+            keyIteratorType: this.keyIterator?.type
+          })
+        })
+      })
+    }
+
     return accountsWithStatus
   }
 
@@ -999,6 +1031,22 @@ export class AccountPickerController extends EventEmitter {
 
       if (nextAccountOnPage) {
         this.selectAccount(nextAccountOnPage.account)
+
+        // The key that controls the smart account is added with it, after it.
+        if (this.shouldSelectSmartAccountAutomatically) {
+          const keyOnTheSameSlot = this.accountsOnPage.find(
+            ({ account, index, slot }) =>
+              slot === nextAccountOnPage.slot &&
+              !isSmartAccount(account) &&
+              isDerivedForSmartAccountKeyOnly(index)
+          )
+          if (
+            keyOnTheSameSlot &&
+            keyOnTheSameSlot.importStatus !== ImportStatus.ImportedWithTheSameKeys
+          ) {
+            this.selectAccount(keyOnTheSameSlot.account)
+          }
+        }
         break
       }
 
