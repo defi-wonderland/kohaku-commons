@@ -1,9 +1,8 @@
-import { HumanizerMeta } from 'libs/humanizer/interfaces'
-
 import { describe, expect } from '@jest/globals'
 
 import humanizerInfo from '../../../../consts/humanizer/humanizerInfo.json'
 import { AccountOp } from '../../../accountOp/accountOp'
+import { HumanizerMeta } from '../../interfaces'
 import { fallbackHumanizer } from './fallBackHumanizer'
 
 const accountOp: AccountOp = {
