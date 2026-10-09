@@ -69,12 +69,10 @@ import { hasRelayerSupport } from '../../libs/networks/networks'
 import { AbstractPaymaster } from '../../libs/paymaster/abstractPaymaster'
 import { GetOptions, TokenResult } from '../../libs/portfolio'
 import {
-  adjustEntryPointAuthorization,
   get7702Sig,
   get7702UserOpTypedData,
   getAuthorizationHash,
-  getEIP712Signature,
-  getEntryPointAuthorization,
+  getEntryPointAuthorizationSignature,
   getExecuteSignature,
   getTypedData,
   wrapStandard,
@@ -1892,20 +1890,13 @@ export class SignAccountOpController extends EventEmitter {
         }
 
         if (shouldSignDeployAuth) {
-          const epActivatorTypedData = await getEntryPointAuthorization(
+          if (!this.accountOp.meta) this.accountOp.meta = {}
+          this.accountOp.meta.entryPointAuthorization = await getEntryPointAuthorizationSignature(
             this.account.addr,
             this.#network.chainId,
-            accountState.nonce
+            accountState.nonce,
+            signer
           )
-          const epSignature = await getEIP712Signature(
-            epActivatorTypedData,
-            this.account,
-            accountState,
-            signer,
-            this.#network
-          )
-          if (!this.accountOp.meta) this.accountOp.meta = {}
-          this.accountOp.meta.entryPointAuthorization = adjustEntryPointAuthorization(epSignature)
 
           // after signing is complete, go to paymaster mode
           if (isUsingPaymaster) {
