@@ -1,4 +1,4 @@
-import { RPCProvider } from 'interfaces/provider'
+import { RPCProvider } from '../../interfaces/provider'
 import { Network } from '../../interfaces/network'
 import { GetOptions, Portfolio, TokenResult } from '../../libs/portfolio'
 import { getRpcProvider } from '../provider'

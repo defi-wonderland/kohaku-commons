@@ -1,4 +1,3 @@
-import { ActivityController } from 'controllers/activity/activity'
 import { formatUnits, isAddress, parseUnits } from 'ethers'
 
 import { FEE_COLLECTOR } from '../../consts/addresses'
@@ -24,6 +23,7 @@ import {
 } from '../../utils/numbers/formatters'
 import wait from '../../utils/wait'
 import { AccountsController } from '../accounts/accounts'
+import { ActivityController } from '../activity/activity'
 import { AddressBookController } from '../addressBook/addressBook'
 import { EstimationStatus } from '../estimation/types'
 import EventEmitter from '../eventEmitter/eventEmitter'
