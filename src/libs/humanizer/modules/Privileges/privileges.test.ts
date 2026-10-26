@@ -501,9 +501,10 @@ describe('privileges', () => {
       const clearSetup: Call = {
         to: manager,
         value: 0n,
-        data: new Interface(['function clearSetup(address)']).encodeFunctionData('clearSetup', [
-          auditedAction
-        ]),
+        data: new Interface(['function clearSetup(address, uint64)']).encodeFunctionData(
+          'clearSetup',
+          [auditedAction, 1]
+        ),
         fromUserRequestId: kitRequestId
       }
       const opFor = (calls: Call[]) => ({
