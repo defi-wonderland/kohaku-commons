@@ -148,7 +148,13 @@ describe('the recovery manager calls', () => {
         { type: 'address', address: action.toLowerCase() }
       ])
     })
-    const [withoutKit] = humanizeAccountOp({ ...accountOp, calls: [calls[0]] }, {})
-    expect(withoutKit.fullVisualization?.[0]).not.toMatchObject({ content: managerCalls[0].label })
+    const withoutKit = humanizeAccountOp({ ...accountOp, calls }, {})
+    withoutKit.forEach((call) => {
+      expect(call.fullVisualization?.slice(0, 3)).toMatchObject([
+        { type: 'action', content: 'Interacting' },
+        { type: 'label', content: 'with' },
+        { type: 'address', address: manager.toLowerCase() }
+      ])
+    })
   })
 })
