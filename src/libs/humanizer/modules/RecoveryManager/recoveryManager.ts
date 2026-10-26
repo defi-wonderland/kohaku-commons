@@ -23,11 +23,17 @@ export const recoveryManagerHumanizer: HumanizerCallModule = (
   irCalls: IrCall[]
 ) => {
   const manager = accountOp.meta?.recoveryKit?.manager
-  if (!manager) return irCalls
+  if (!manager) {
+    return irCalls
+  }
   return irCalls.map((call) => {
-    if (!call.to || call.to.toLowerCase() !== manager.toLowerCase()) return call
+    if (!call.to || call.to.toLowerCase() !== manager.toLowerCase()) {
+      return call
+    }
     const label = labels[call.data.slice(0, 10).toLowerCase()]
-    if (!label) return call
+    if (!label) {
+      return call
+    }
     return { ...call, fullVisualization: [getAction(label)] }
   })
 }
