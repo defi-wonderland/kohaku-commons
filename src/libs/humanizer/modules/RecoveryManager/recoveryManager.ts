@@ -2,7 +2,7 @@ import { Interface } from 'ethers'
 
 import { AccountOp } from '../../../accountOp/accountOp'
 import { HumanizerCallModule, IrCall } from '../../interfaces'
-import { getAction } from '../../utils'
+import { getAction, getAddressVisualization } from '../../utils'
 
 const iface = new Interface([
   'function commitSetup(address action, bytes32 setupCommitment, uint64 nonce, bytes publicMetadata, bytes privateMetadata)',
@@ -34,6 +34,15 @@ export const recoveryManagerHumanizer: HumanizerCallModule = (
     if (!label) {
       return call
     }
-    return { ...call, fullVisualization: [getAction(label)] }
+    let action: string
+    try {
+      ;[action] = iface.parseTransaction(call)!.args
+    } catch {
+      return call
+    }
+    return {
+      ...call,
+      fullVisualization: [getAction(label), getAddressVisualization(action)]
+    }
   })
 }

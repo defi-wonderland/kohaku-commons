@@ -72,16 +72,19 @@ const humanize = (op: AccountOp): IrCall[] =>
 describe('the recovery manager calls', () => {
   managerCalls.forEach(({ name, data, label }) => {
     describe(name, () => {
-      test(`is shown as "${label}" when the op carries the recovery kit`, () => {
+      test(`is shown as "${label}" of its action when the op carries the recovery kit`, () => {
         const [shown] = humanize(withKit([callTo(manager, data)]))
-        expect(shown.fullVisualization).toMatchObject([{ type: 'action', content: label }])
+        expect(shown.fullVisualization).toMatchObject([
+          { type: 'action', content: label },
+          { type: 'address', address: action.toLowerCase() }
+        ])
       })
 
       test('is labelled whatever the casing of the manager address', () => {
         const [lowerCaseCall] = humanize(withKit([callTo(manager.toLowerCase(), data)]))
-        expect(lowerCaseCall.fullVisualization).toMatchObject([{ content: label }])
+        expect(lowerCaseCall.fullVisualization?.[0]).toMatchObject({ content: label })
         const [lowerCaseKit] = humanize(withKit([callTo(manager, data)], manager.toLowerCase()))
-        expect(lowerCaseKit.fullVisualization).toMatchObject([{ content: label }])
+        expect(lowerCaseKit.fullVisualization?.[0]).toMatchObject({ content: label })
       })
 
       test('is left untouched when the op does not carry the recovery kit', () => {
@@ -96,6 +99,24 @@ describe('the recovery manager calls', () => {
         expect(shown).toEqual(call)
       })
     })
+  })
+
+  test('names the action the call carries, not the one the recovery kit lists', () => {
+    const [shown] = humanize(
+      withKit([
+        callTo(manager, managerIface.encodeFunctionData('cancelByOwner', [otherAddress, 7]))
+      ])
+    )
+    expect(shown.fullVisualization).toMatchObject([
+      { type: 'action', content: 'Cancel recovery' },
+      { type: 'address', address: otherAddress.toLowerCase() }
+    ])
+  })
+
+  test('a call with a known selector but malformed arguments is left untouched', () => {
+    const call = callTo(manager, managerCalls[1].data.slice(0, 20))
+    const [shown] = humanize(withKit([call]))
+    expect(shown).toEqual(call)
   })
 
   test('another call to the manager is left untouched', () => {
@@ -122,7 +143,10 @@ describe('the recovery manager calls', () => {
     const calls = managerCalls.map(({ data }) => callTo(manager, data))
     const shown = humanizeAccountOp(withKit(calls), {})
     managerCalls.forEach(({ label }, i) => {
-      expect(shown[i].fullVisualization?.[0]).toMatchObject({ type: 'action', content: label })
+      expect(shown[i].fullVisualization?.slice(0, 2)).toMatchObject([
+        { type: 'action', content: label },
+        { type: 'address', address: action.toLowerCase() }
+      ])
     })
     const [withoutKit] = humanizeAccountOp({ ...accountOp, calls: [calls[0]] }, {})
     expect(withoutKit.fullVisualization?.[0]).not.toMatchObject({ content: managerCalls[0].label })
