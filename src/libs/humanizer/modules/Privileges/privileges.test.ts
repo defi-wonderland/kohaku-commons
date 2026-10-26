@@ -514,19 +514,48 @@ describe('privileges', () => {
         }
       })
 
-      test('is shown as revoking access with no warning, alone or beside clearSetup', () => {
+      test('is shown as disabling the recovery module with no warning, alone or beside clearSetup', () => {
         const [alone] = humanize([kitRevoke])
         const [, besideClear] = humanize([clearSetup, kitRevoke])
         ;[alone, besideClear].forEach((shown) => {
           expect(shown.fullVisualization).toMatchObject([
-            { type: 'action', content: 'Revoke access' },
-            { type: 'label', content: 'of' },
-            { type: 'address', address: kitSlot(auditedAction).toLowerCase() }
+            { type: 'action', content: 'Disable recovery module' },
+            { type: 'address', address: auditedAction }
           ])
           expect(shown.fullVisualization).not.toContainEqual(
             expect.objectContaining({ warning: true })
           )
           expect(shown.warnings).toBeUndefined()
+        })
+      })
+
+      test('keeps the warnings the call already carries', () => {
+        const earlierWarning = { content: 'An earlier warning', level: 'warning' as const }
+        const revokeWithWarning = { ...kitRevoke, warnings: [earlierWarning] }
+        const [shown] = humanize([revokeWithWarning])
+        expect(shown.warnings).toEqual([earlierWarning])
+      })
+
+      test('a zero write at another slot, or without the recovery kit, is shown as revoking access', () => {
+        const unlistedRevoke = grant(kitSlot(unlistedAction), ZeroHash)
+        const [otherSlot] = humanize([unlistedRevoke])
+        const [withoutKit] = privilegeHumanizer(
+          { ...accountOp, calls: [kitRevoke] },
+          [kitRevoke],
+          humanizerInfo as HumanizerMeta
+        )
+        const [fromOtherRequestShown] = humanize([fromOtherRequest(kitRevoke)])
+        const cases = [
+          { shown: otherSlot, slot: kitSlot(unlistedAction) },
+          { shown: withoutKit, slot: kitSlot(auditedAction) },
+          { shown: fromOtherRequestShown, slot: kitSlot(auditedAction) }
+        ]
+        cases.forEach(({ shown, slot }) => {
+          expect(shown.fullVisualization).toMatchObject([
+            { type: 'action', content: 'Revoke access' },
+            { type: 'label', content: 'of' },
+            { type: 'address', address: slot.toLowerCase() }
+          ])
         })
       })
 
