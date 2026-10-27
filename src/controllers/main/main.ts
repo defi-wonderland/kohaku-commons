@@ -219,10 +219,12 @@ export class MainController extends EventEmitter {
   #signAndBroadcastCallId: string | null = null
 
   /**
-   * The action whose transaction went to the network. A broadcast that threw may still have been
-   * accepted by the node or the bundler, so a later rejection of that action is not a no-send.
+   * The actions whose transaction went to the network. A broadcast that threw may still have been
+   * accepted by the node or the bundler, so a later rejection of such an action is not a no-send.
+   * An entry stays until its action resolves or is rejected; a stale one only keeps the settle
+   * period for a later action with the same id.
    */
-  #broadcastAttemptedActionId: AccountOpAction['id'] | null = null
+  #broadcastAttemptedActionIds = new Set<AccountOpAction['id']>()
 
   constructor({
     platform,
@@ -1028,20 +1030,12 @@ export class MainController extends EventEmitter {
       this.statuses.signAndBroadcastAccountOp === 'INITIAL' &&
       this.#signAndBroadcastCallId === null &&
       signAccountOp?.status?.type !== SigningStatus.Done &&
-      actionId !== this.#broadcastAttemptedActionId
+      !this.#broadcastAttemptedActionIds.has(actionId)
     )
-  }
-
-  #clearBroadcastAttempt(actionId: AccountOpAction['id']) {
-    if (this.#broadcastAttemptedActionId === actionId) {
-      this.#broadcastAttemptedActionId = null
-    }
   }
 
   destroySignAccOp() {
     if (!this.signAccountOp) return
-
-    this.#clearBroadcastAttempt(this.signAccountOp.fromActionId)
 
     this.#abortHWTransactionSign(this.signAccountOp)
     this.feePayerKey = null
@@ -1599,7 +1593,7 @@ export class MainController extends EventEmitter {
     actionId: AccountOpAction['id'],
     isBasicAccountBroadcastingMultiple: boolean
   ) {
-    this.#clearBroadcastAttempt(actionId)
+    this.#broadcastAttemptedActionIds.delete(actionId)
     const accountOpAction = this.requests.actions.actionsQueue.find((a) => a.id === actionId)
     if (!accountOpAction) return
 
@@ -1698,7 +1692,7 @@ export class MainController extends EventEmitter {
       this.signAccountOp && this.signAccountOp.fromActionId === id ? this.signAccountOp : null,
       id
     )
-    this.#clearBroadcastAttempt(id)
+    this.#broadcastAttemptedActionIds.delete(id)
 
     if (this.signAccountOp && this.signAccountOp.fromActionId === id) {
       this.destroySignAccOp()
@@ -1831,7 +1825,7 @@ export class MainController extends EventEmitter {
     }
 
     this.statuses.signAndBroadcastAccountOp = 'BROADCASTING'
-    this.#broadcastAttemptedActionId = signAccountOp.fromActionId
+    this.#broadcastAttemptedActionIds.add(signAccountOp.fromActionId)
     await this.forceEmitUpdate()
 
     const accountState = await this.accounts.getOrFetchAccountOnChainState(
