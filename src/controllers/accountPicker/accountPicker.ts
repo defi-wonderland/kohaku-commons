@@ -217,9 +217,8 @@ export class AccountPickerController extends EventEmitter {
       // Remove smart accounts derived programmatically, because since v4.60.0
       // unused smart accounts are no longer displayed on page.
       .filter((a) => !isSmartAccount(a.account))
-      // The displayed (visible) accounts on page should not include the derived
-      // EOA (basic) accounts only used as smart account keys, they should not
-      // be visible nor importable (or selectable).
+      // The keys derived for a smart account stay out of the basic rows. On a
+      // seed they are listed after the smart accounts and can be selected with them.
       .filter((x) => !isDerivedForSmartAccountKeyOnly(x.index))
       .flatMap((derivedAccount) => {
         const associatedLinkedAccounts = this.#linkedAccounts.filter(

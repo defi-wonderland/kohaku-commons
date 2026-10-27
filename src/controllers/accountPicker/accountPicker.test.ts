@@ -3,7 +3,7 @@ import { Wallet } from 'ethers'
 import fetch from 'node-fetch'
 
 /* eslint-disable no-new */
-import { describe, expect, test } from '@jest/globals'
+import { describe, expect, jest, test } from '@jest/globals'
 
 import { relayerUrl } from '../../../test/config'
 import { produceMemoryStore } from '../../../test/helpers'
@@ -670,7 +670,11 @@ describe('AccountPicker', () => {
       }
     }) as unknown as typeof fetch
 
-    const isolatedPicker = (importedAccounts: Account[], keys: Key[]) =>
+    const isolatedPicker = (
+      importedAccounts: Account[],
+      keys: Key[],
+      relayerFetch: typeof fetch = relayerThatCreatesIdentities
+    ) =>
       new AccountPickerController({
         accounts: {
           accounts: importedAccounts,
@@ -684,7 +688,7 @@ describe('AccountPicker', () => {
         networks: networksCtrl,
         providers: providersCtrl,
         relayerUrl,
-        fetch: relayerThatCreatesIdentities,
+        fetch: relayerFetch,
         externalSignerControllers: {},
         onAddAccountsSuccessCallback: () => Promise.resolve()
       })
@@ -884,6 +888,99 @@ describe('AccountPicker', () => {
       await createPicker.setPage({ page: 1 })
 
       expect(rowsOf(importPicker)).toEqual(rowsOf(createPicker))
+    })
+
+    test('lists the linked smart account of the first slot and the next one, each with its key, and selects only the first basic account', async () => {
+      const seed = Wallet.createRandom().mnemonic!.phrase
+      const unlinkedPicker = isolatedPicker([], [])
+      unlinkedPicker.setInitParams(importParams(new KeyIterator(seed)))
+      await unlinkedPicker.init()
+      await unlinkedPicker.setPage({ page: 1 })
+      const firstSmartAcc = unlinkedPicker.accountsOnPage.find(
+        (a) => isSmartAccount(a.account) && a.slot === 1
+      )!.account
+      const firstKeyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
+      const secondKeyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1)
+
+      // Answers the linked search with the smart account of the first slot.
+      const relayerThatLinksTheFirstSlot = (async (url: string, init?: { body?: string }) => {
+        if (!url.includes('/linked/accounts')) return relayerThatCreatesIdentities(url, init)
+        return {
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              success: true,
+              data: {
+                accounts: {
+                  [firstSmartAcc.addr]: {
+                    ...firstSmartAcc.creation,
+                    associatedKeys: { [firstKeyAddr]: dedicatedToOneSAPriv },
+                    initialPrivilegesAddrs: [firstKeyAddr]
+                  }
+                }
+              }
+            })
+        }
+      }) as unknown as typeof fetch
+
+      const picker = isolatedPicker([], [], relayerThatLinksTheFirstSlot)
+      picker.setInitParams({
+        ...importParams(new KeyIterator(seed)),
+        shouldSearchForLinkedAccounts: true
+      })
+      await picker.init()
+      await picker.setPage({ page: 1 })
+
+      expect(picker.emittedErrors).toHaveLength(0)
+      expect(rowsOf(picker).slice(PAGE_SIZE)).toEqual([
+        { addr: firstSmartAcc.addr, isSmartAccount: true, index: 0, slot: 1 },
+        expect.objectContaining({ isSmartAccount: true, index: 1, slot: 2 }),
+        {
+          addr: firstKeyAddr,
+          isSmartAccount: false,
+          index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET,
+          slot: 1
+        },
+        {
+          addr: secondKeyAddr,
+          isSmartAccount: false,
+          index: SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET + 1,
+          slot: 2
+        }
+      ])
+
+      await picker.selectNextAccount()
+
+      expect(picker.selectedAccounts.map((a) => a.account.addr)).toEqual([addressAt(seed, 0)])
+    })
+
+    test('refuses to select the key of a smart account on a hardware wallet', async () => {
+      const seed = Wallet.createRandom().mnemonic!.phrase
+      const seedIterator = new KeyIterator(seed)
+      const hardwareIterator: KeyIteratorInterface = {
+        type: 'ledger',
+        subType: 'hw',
+        retrieve: (fromToArr, derivation) => seedIterator.retrieve(fromToArr, derivation)
+      }
+      const picker = isolatedPicker([], [])
+      picker.setInitParams(importParams(hardwareIterator))
+      await picker.init()
+      await picker.setPage({ page: 1 })
+
+      const keyAddr = addressAt(seed, SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
+      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        picker.selectAccount(getBasicAccount(keyAddr, []))
+      } finally {
+        consoleError.mockRestore()
+      }
+
+      expect(picker.selectedAccounts.map((a) => a.account.addr)).not.toContain(keyAddr)
+      expect(
+        picker.emittedErrors.some((e) =>
+          e.error.message.includes(`Trying to select ${keyAddr} account`)
+        )
+      ).toBe(true)
     })
   })
 
