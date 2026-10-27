@@ -116,8 +116,9 @@ export class RequestsController extends EventEmitter {
 
   userRequestsWaitingAccountSwitch: UserRequest[] = []
 
-  // The ids of the latest user requests the user rejected before anything was signed,
-  // so that a client without a dapp promise can tell a rejection from a broadcast.
+  // The ids of the latest user requests the user rejected while nothing signed, broadcast or
+  // awaited the end of a broadcast and no signed transaction was held, so that a client without
+  // a dapp promise can tell a rejection that sent nothing from a request that may have been sent.
   rejectedUserRequestIds: UserRequest['id'][] = []
 
   actions: ActionsController

@@ -418,6 +418,20 @@ describe('RequestsController ', () => {
       expect(controller.rejectedUserRequestIds).toEqual([])
     })
 
+    test('a rejection by the user while a send may be in progress is not recorded', async () => {
+      const { controller } = await prepareTest()
+      await controller.addUserRequests([callsRequest('while-broadcasting')])
+
+      await controller.rejectUserRequests(
+        'User rejected the transaction request.',
+        ['while-broadcasting'],
+        { isUserRejection: false }
+      )
+
+      expect(controller.userRequests.length).toBe(0)
+      expect(controller.rejectedUserRequestIds).toEqual([])
+    })
+
     test('an id no longer in the queue is not recorded', async () => {
       const { controller } = await prepareTest()
 

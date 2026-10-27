@@ -1008,6 +1008,19 @@ export class MainController extends EventEmitter {
     this.#signAccountOpSigningPromise = undefined
   }
 
+  /**
+   * A rejection proves that nothing was sent only while nothing signs, broadcasts or awaits the
+   * end of a broadcast (the sign-and-broadcast call stays open until the sent transaction is
+   * recorded and its requests resolved), and while no signed transaction is held for a retry.
+   */
+  #isRejectionBeforeAnySend(signAccountOp: SignAccountOpController | null) {
+    return (
+      this.statuses.signAndBroadcastAccountOp === 'INITIAL' &&
+      this.#signAndBroadcastCallId === null &&
+      signAccountOp?.status?.type !== SigningStatus.Done
+    )
+  }
+
   destroySignAccOp() {
     if (!this.signAccountOp) return
 
@@ -1491,7 +1504,7 @@ export class MainController extends EventEmitter {
           await this.requests.rejectUserRequests(
             'User rejected the transaction request.',
             [userRequest.id],
-            { isUserRejection: this.statuses.signAndBroadcastAccountOp === 'INITIAL' }
+            { isUserRejection: this.#isRejectionBeforeAnySend(this.signAccountOp) }
           )
         } else {
           const accountOpAction = makeAccountOpAction({
@@ -1655,9 +1668,10 @@ export class MainController extends EventEmitter {
     const accountOpAction = this.requests.actions.actionsQueue.find((a) => a.id === actionId)
     if (!accountOpAction) return
 
-    // A rejection while a sign or a broadcast is in progress does not prove nothing was sent
-    const isUserRejection = this.statuses.signAndBroadcastAccountOp === 'INITIAL'
     const { accountOp, id } = accountOpAction as AccountOpAction
+    const isUserRejection = this.#isRejectionBeforeAnySend(
+      this.signAccountOp && this.signAccountOp.fromActionId === id ? this.signAccountOp : null
+    )
 
     if (this.signAccountOp && this.signAccountOp.fromActionId === id) {
       this.destroySignAccOp()
