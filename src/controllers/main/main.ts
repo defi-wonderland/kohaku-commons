@@ -218,6 +218,12 @@ export class MainController extends EventEmitter {
    */
   #signAndBroadcastCallId: string | null = null
 
+  /**
+   * The action whose transaction went to the network. A broadcast that threw may still have been
+   * accepted by the node or the bundler, so a later rejection of that action is not a no-send.
+   */
+  #broadcastAttemptedActionId: AccountOpAction['id'] | null = null
+
   constructor({
     platform,
     storageAPI,
@@ -1011,18 +1017,31 @@ export class MainController extends EventEmitter {
   /**
    * A rejection proves that nothing was sent only while nothing signs, broadcasts or awaits the
    * end of a broadcast (the sign-and-broadcast call stays open until the sent transaction is
-   * recorded and its requests resolved), and while no signed transaction is held for a retry.
+   * recorded and its requests resolved), while no signed transaction is held for a retry, and
+   * while the action never went to the network.
    */
-  #isRejectionBeforeAnySend(signAccountOp: SignAccountOpController | null) {
+  #isRejectionBeforeAnySend(
+    signAccountOp: SignAccountOpController | null,
+    actionId: AccountOpAction['id']
+  ) {
     return (
       this.statuses.signAndBroadcastAccountOp === 'INITIAL' &&
       this.#signAndBroadcastCallId === null &&
-      signAccountOp?.status?.type !== SigningStatus.Done
+      signAccountOp?.status?.type !== SigningStatus.Done &&
+      actionId !== this.#broadcastAttemptedActionId
     )
+  }
+
+  #clearBroadcastAttempt(actionId: AccountOpAction['id']) {
+    if (this.#broadcastAttemptedActionId === actionId) {
+      this.#broadcastAttemptedActionId = null
+    }
   }
 
   destroySignAccOp() {
     if (!this.signAccountOp) return
+
+    this.#clearBroadcastAttempt(this.signAccountOp.fromActionId)
 
     this.#abortHWTransactionSign(this.signAccountOp)
     this.feePayerKey = null
@@ -1504,7 +1523,12 @@ export class MainController extends EventEmitter {
           await this.requests.rejectUserRequests(
             'User rejected the transaction request.',
             [userRequest.id],
-            { isUserRejection: this.#isRejectionBeforeAnySend(this.signAccountOp) }
+            {
+              isUserRejection: this.#isRejectionBeforeAnySend(
+                this.signAccountOp,
+                this.signAccountOp.fromActionId
+              )
+            }
           )
         } else {
           const accountOpAction = makeAccountOpAction({
@@ -1575,6 +1599,7 @@ export class MainController extends EventEmitter {
     actionId: AccountOpAction['id'],
     isBasicAccountBroadcastingMultiple: boolean
   ) {
+    this.#clearBroadcastAttempt(actionId)
     const accountOpAction = this.requests.actions.actionsQueue.find((a) => a.id === actionId)
     if (!accountOpAction) return
 
@@ -1670,8 +1695,10 @@ export class MainController extends EventEmitter {
 
     const { accountOp, id } = accountOpAction as AccountOpAction
     const isUserRejection = this.#isRejectionBeforeAnySend(
-      this.signAccountOp && this.signAccountOp.fromActionId === id ? this.signAccountOp : null
+      this.signAccountOp && this.signAccountOp.fromActionId === id ? this.signAccountOp : null,
+      id
     )
+    this.#clearBroadcastAttempt(id)
 
     if (this.signAccountOp && this.signAccountOp.fromActionId === id) {
       this.destroySignAccOp()
@@ -1804,6 +1831,7 @@ export class MainController extends EventEmitter {
     }
 
     this.statuses.signAndBroadcastAccountOp = 'BROADCASTING'
+    this.#broadcastAttemptedActionId = signAccountOp.fromActionId
     await this.forceEmitUpdate()
 
     const accountState = await this.accounts.getOrFetchAccountOnChainState(
