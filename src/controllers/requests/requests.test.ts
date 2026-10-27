@@ -94,7 +94,10 @@ const prepareTest = async () => {
   providersCtrl = new ProvidersController(networksCtrl)
   const providers: RPCProviders = {}
   networks.forEach((network) => {
-    providers[network.chainId.toString()] = getRpcProvider(network)
+    providers[network.chainId.toString()] = getRpcProvider({
+      ...network,
+      rpcUrls: network.rpcUrls.length ? network.rpcUrls : ['http://127.0.0.1:8545']
+    })
     providers[network.chainId.toString()].isWorking = true
   })
   providersCtrl.providers = providers
@@ -365,5 +368,80 @@ describe('RequestsController ', () => {
     expect(controller.actions.visibleActionsQueue.length).toBe(0)
     expect(rejectMock).toHaveBeenCalled()
     expect(resolveMock).not.toHaveBeenCalled()
+  })
+  describe('rejected user request ids', () => {
+    const callsRequest = (id: string): UserRequest => ({
+      id,
+      action: {
+        kind: 'calls',
+        calls: [
+          {
+            to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+            value: BigInt(0),
+            data: '0x'
+          }
+        ]
+      },
+      session: new Session(),
+      meta: {
+        isSignAction: true,
+        accountAddr: '0x77777777789A8BBEE6C64381e5E89E501fb0e4c8',
+        chainId: 1n
+      }
+    })
+
+    test('a rejection by the user records the request id in the state', async () => {
+      const { controller } = await prepareTest()
+      await controller.addUserRequests([callsRequest('rejected-by-user')])
+
+      await controller.rejectUserRequests(
+        'User rejected the transaction request.',
+        ['rejected-by-user'],
+        {
+          isUserRejection: true
+        }
+      )
+
+      expect(controller.userRequests.length).toBe(0)
+      expect(controller.rejectedUserRequestIds).toEqual(['rejected-by-user'])
+      expect(controller.toJSON().rejectedUserRequestIds).toEqual(['rejected-by-user'])
+    })
+
+    test('a resolved request and a rejection not made by the user are not recorded', async () => {
+      const { controller } = await prepareTest()
+      await controller.addUserRequests([callsRequest('broadcast'), callsRequest('by-bundler')])
+
+      await controller.resolveUserRequest(null, 'broadcast')
+      await controller.rejectUserRequests('Transaction rejected by the bundler', ['by-bundler'])
+
+      expect(controller.userRequests.length).toBe(0)
+      expect(controller.rejectedUserRequestIds).toEqual([])
+    })
+
+    test('an id no longer in the queue is not recorded', async () => {
+      const { controller } = await prepareTest()
+
+      await controller.rejectUserRequests('User rejected the transaction request.', ['unknown'], {
+        isUserRejection: true
+      })
+
+      expect(controller.rejectedUserRequestIds).toEqual([])
+    })
+
+    test('the list keeps only the latest 50 ids', async () => {
+      const { controller } = await prepareTest()
+      const ids = Array.from({ length: 52 }, (_, i) => `request-${i}`)
+
+      const rejectInOneGo = async (batch: string[]) => {
+        await controller.addUserRequests(batch.map(callsRequest))
+        await controller.rejectUserRequests('User rejected the transaction request.', batch, {
+          isUserRejection: true
+        })
+      }
+      await rejectInOneGo(ids.slice(0, 30))
+      await rejectInOneGo(ids.slice(30))
+
+      expect(controller.rejectedUserRequestIds).toEqual(ids.slice(-50))
+    })
   })
 })

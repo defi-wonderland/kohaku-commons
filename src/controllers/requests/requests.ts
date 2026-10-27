@@ -72,6 +72,8 @@ const STATUS_WRAPPED_METHODS = {
   buildSwapAndBridgeUserRequest: 'INITIAL'
 } as const
 
+const MAX_REJECTED_USER_REQUEST_IDS = 50
+
 /**
  * The RequestsController is responsible for building different user request types and managing their associated actions (within an action window).
  * Prior to v2.66.0, all request logic resided in the MainController. To improve scalability, readability,
@@ -113,6 +115,10 @@ export class RequestsController extends EventEmitter {
   userRequests: UserRequest[] = []
 
   userRequestsWaitingAccountSwitch: UserRequest[] = []
+
+  // The ids of the latest user requests the user rejected before anything was signed,
+  // so that a client without a dapp promise can tell a rejection from a broadcast.
+  rejectedUserRequestIds: UserRequest['id'][] = []
 
   actions: ActionsController
 
@@ -492,9 +498,11 @@ export class RequestsController extends EventEmitter {
     options?: {
       shouldRemoveSwapAndBridgeRoute?: boolean
       shouldOpenNextRequest?: boolean
+      isUserRejection?: boolean
     }
   ) {
     const userRequestsToRemove: string[] = []
+    const rejectedIds: UserRequest['id'][] = []
 
     requestIds.forEach((requestId) => {
       const userRequest = this.userRequests.find((r) => r.id === requestId)
@@ -519,7 +527,14 @@ export class RequestsController extends EventEmitter {
       }
 
       userRequest.dappPromise?.reject(ethErrors.provider.userRejectedRequest<any>(err))
+      rejectedIds.push(userRequest.id)
     })
+
+    if (options?.isUserRejection && rejectedIds.length) {
+      this.rejectedUserRequestIds = [...this.rejectedUserRequestIds, ...rejectedIds].slice(
+        -MAX_REJECTED_USER_REQUEST_IDS
+      )
+    }
 
     await this.removeUserRequests([...userRequestsToRemove, ...requestIds], options)
   }
