@@ -1488,9 +1488,11 @@ export class MainController extends EventEmitter {
 
         if (userRequest.action.calls.length === 0) {
           // the reject will remove the userRequest which will rebuild the action and update the signAccountOp
-          await this.requests.rejectUserRequests('User rejected the transaction request.', [
-            userRequest.id
-          ])
+          await this.requests.rejectUserRequests(
+            'User rejected the transaction request.',
+            [userRequest.id],
+            { isUserRejection: this.statuses.signAndBroadcastAccountOp === 'INITIAL' }
+          )
         } else {
           const accountOpAction = makeAccountOpAction({
             account: this.accounts.accounts.find((a) => a.addr === accountAddr)!,
@@ -1653,6 +1655,8 @@ export class MainController extends EventEmitter {
     const accountOpAction = this.requests.actions.actionsQueue.find((a) => a.id === actionId)
     if (!accountOpAction) return
 
+    // A rejection while a sign or a broadcast is in progress does not prove nothing was sent
+    const isUserRejection = this.statuses.signAndBroadcastAccountOp === 'INITIAL'
     const { accountOp, id } = accountOpAction as AccountOpAction
 
     if (this.signAccountOp && this.signAccountOp.fromActionId === id) {
@@ -1665,7 +1669,8 @@ export class MainController extends EventEmitter {
       .map((call) => call.fromUserRequestId)
 
     await this.requests.rejectUserRequests(err, requestIdsToRemove as string[], {
-      shouldOpenNextRequest: shouldOpenNextAction
+      shouldOpenNextRequest: shouldOpenNextAction,
+      isUserRejection
     })
 
     this.emitUpdate()
