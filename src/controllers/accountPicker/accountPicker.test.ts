@@ -3,7 +3,7 @@ import { Wallet } from 'ethers'
 import fetch from 'node-fetch'
 
 /* eslint-disable no-new */
-import { describe, expect, jest, test } from '@jest/globals'
+import { describe, expect, test } from '@jest/globals'
 
 import { relayerUrl } from '../../../test/config'
 import { produceMemoryStore } from '../../../test/helpers'
@@ -19,7 +19,12 @@ import { networks } from '../../consts/networks'
 import { Account, ImportStatus } from '../../interfaces/account'
 import { dedicatedToOneSAPriv, Key } from '../../interfaces/keystore'
 import { Storage } from '../../interfaces/storage'
-import { getBasicAccount, getSmartAccount, isSmartAccount } from '../../libs/account/account'
+import {
+  getBasicAccount,
+  getSmartAccount,
+  isDerivedForSmartAccountKeyOnly,
+  isSmartAccount
+} from '../../libs/account/account'
 import { getPrivateKeyFromSeed, KeyIterator } from '../../libs/keyIterator/keyIterator'
 import { getRpcProvider } from '../../services/provider'
 import { AccountsController } from '../accounts/accounts'
@@ -174,7 +179,7 @@ describe('AccountPicker', () => {
     })
   })
 
-  test('should retrieve 5 basic and one smart account on each page', async () => {
+  test('should retrieve 5 basic accounts, one smart account and its key on each page', async () => {
     const PAGE_SIZE = 5
     const keyIterator = new KeyIterator(process.env.SEED)
     accountPicker.setInitParams({
@@ -187,14 +192,28 @@ describe('AccountPicker', () => {
     })
     await accountPicker.init()
     await accountPicker.setPage({ page: 1 })
-    expect(accountPicker.accountsOnPage).toHaveLength(6)
+    expect(accountPicker.accountsOnPage).toHaveLength(7)
     expect(accountPicker.accountsOnPage.filter((a) => isSmartAccount(a.account))).toHaveLength(1)
-    expect(accountPicker.accountsOnPage.filter((a) => !isSmartAccount(a.account))).toHaveLength(5)
+    expect(
+      accountPicker.accountsOnPage.filter(
+        (a) => !isSmartAccount(a.account) && !isDerivedForSmartAccountKeyOnly(a.index)
+      )
+    ).toHaveLength(5)
+    expect(
+      accountPicker.accountsOnPage.filter((a) => isDerivedForSmartAccountKeyOnly(a.index))
+    ).toHaveLength(1)
 
     await accountPicker.setPage({ page: 2 })
-    expect(accountPicker.accountsOnPage).toHaveLength(6)
+    expect(accountPicker.accountsOnPage).toHaveLength(7)
     expect(accountPicker.accountsOnPage.filter((a) => isSmartAccount(a.account))).toHaveLength(1)
-    expect(accountPicker.accountsOnPage.filter((a) => !isSmartAccount(a.account))).toHaveLength(5)
+    expect(
+      accountPicker.accountsOnPage.filter(
+        (a) => !isSmartAccount(a.account) && !isDerivedForSmartAccountKeyOnly(a.index)
+      )
+    ).toHaveLength(5)
+    expect(
+      accountPicker.accountsOnPage.filter((a) => isDerivedForSmartAccountKeyOnly(a.index))
+    ).toHaveLength(1)
   })
 
   test('should find linked accounts', async () => {
@@ -546,7 +565,7 @@ describe('AccountPicker', () => {
     })
   })
 
-  test('selects only the basic account of the next slot when importing a seed', async () => {
+  test('selects only the basic account of the next slot and lists the smart account and its key when importing a seed', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
     const keyIterator = new KeyIterator(seed)
     accountPicker.setInitParams({
@@ -579,12 +598,17 @@ describe('AccountPicker', () => {
           )
         ).address
     )
+    const keysOnPage = accountPicker.accountsOnPage.filter((a) =>
+      smartAccKeyAddrs.includes(a.account.addr)
+    )
+    expect(keysOnPage.map((a) => a.account.addr)).toEqual([smartAccKeyAddrs[0]])
+    expect(keysOnPage[0].index).toBe(SMART_ACCOUNT_SIGNER_KEY_DERIVATION_OFFSET)
     expect(
-      accountPicker.accountsOnPage.filter((a) => smartAccKeyAddrs.includes(a.account.addr))
-    ).toHaveLength(0)
+      accountPicker.accountsOnPage.filter((a) => isSmartAccount(a.account) && a.slot === 1)
+    ).toHaveLength(1)
   })
 
-  test('refuses to select the key of a smart account when importing a seed', async () => {
+  test('selects the key of a smart account when importing a seed', async () => {
     const seed = Wallet.createRandom().mnemonic!.phrase
     accountPicker.setInitParams({
       keyIterator: new KeyIterator(seed),
@@ -605,19 +629,10 @@ describe('AccountPicker', () => {
         BIP44_STANDARD_DERIVATION_TEMPLATE
       )
     ).address
-    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      accountPicker.selectAccount(getBasicAccount(keyAddr, []))
-    } finally {
-      consoleError.mockRestore()
-    }
+    accountPicker.selectAccount(getBasicAccount(keyAddr, []))
 
-    expect(accountPicker.selectedAccounts.map((a) => a.account.addr)).not.toContain(keyAddr)
-    expect(
-      accountPicker.emittedErrors.some((e) =>
-        e.error.message.includes(`Trying to select ${keyAddr} account`)
-      )
-    ).toBe(true)
+    expect(accountPicker.selectedAccounts.map((a) => a.account.addr)).toContain(keyAddr)
+    expect(accountPicker.emittedErrors).toHaveLength(0)
   })
 
   DERIVATION_OPTIONS.forEach(({ label, value }) => {
@@ -637,7 +652,7 @@ describe('AccountPicker', () => {
       // Checks page 1 EOAs
       await accountPicker.setPage({ page: 1 })
       const basicAccountsOnFirstPage = accountPicker.accountsOnPage.filter(
-        (x) => !isSmartAccount(x.account)
+        (x) => !isSmartAccount(x.account) && !isDerivedForSmartAccountKeyOnly(x.index)
       )
       const key1to5BasicAccPublicAddresses = Array.from(
         { length: pageSize },
@@ -651,7 +666,7 @@ describe('AccountPicker', () => {
       // Checks page 2 EOAs
       await accountPicker.setPage({ page: 2 })
       const basicAccountsOnSecondPage = accountPicker.accountsOnPage.filter(
-        (x) => !isSmartAccount(x.account)
+        (x) => !isSmartAccount(x.account) && !isDerivedForSmartAccountKeyOnly(x.index)
       )
       const key6to10BasicAccPublicAddresses = Array.from(
         { length: pageSize },

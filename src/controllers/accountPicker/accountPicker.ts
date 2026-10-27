@@ -340,11 +340,11 @@ export class AccountPickerController extends EventEmitter {
       })
     }
 
-    // On a newly created seed the wallet adds the key that controls the
-    // slot's smart account as an account of its own, so the key is listed
-    // right after the smart accounts. It keeps its derivation index, because
-    // its private key is derived from that index.
-    if (this.shouldSelectSmartAccountAutomatically) {
+    // On a seed (newly created or imported) the wallet lists the key that
+    // controls the slot's smart account as an account of its own, right after
+    // the smart accounts, so the key comes back with its smart account. It
+    // keeps its derivation index, because its private key is derived from it.
+    if (this.shouldListSmartAccountKeys) {
       const smartAccountKeys = accountsWithStatus
         .filter(({ account, isLinked }) => isSmartAccount(account) && !isLinked)
         .flatMap(({ slot }) => {
@@ -373,6 +373,12 @@ export class AccountPickerController extends EventEmitter {
     }
 
     return accountsWithStatus
+  }
+
+  // A seed derives the key of each slot's smart account; a private key and a
+  // hardware wallet keep these keys hidden.
+  get shouldListSmartAccountKeys() {
+    return this.shouldSelectSmartAccountAutomatically || this.subType === 'seed'
   }
 
   get allKeysOnPage() {
@@ -1021,11 +1027,12 @@ export class AccountPickerController extends EventEmitter {
       // On a newly created seed the slot's smart account is the first account
       // to add, and the key that controls it follows; the slot's ordinary
       // basic account stays unselected. With the flag off, every import picks
-      // the next basic account.
+      // the next basic account, never the key of a smart account.
       const nextAccountOnPage = this.accountsOnPage.find(
-        ({ isLinked, account, importStatus }) =>
+        ({ isLinked, account, importStatus, index }) =>
           importStatus !== ImportStatus.ImportedWithTheSameKeys &&
           !isLinked &&
+          !isDerivedForSmartAccountKeyOnly(index) &&
           isSmartAccount(account) === this.shouldSelectSmartAccountAutomatically
       )
       nextAccount = nextAccountOnPage?.account
@@ -1465,6 +1472,7 @@ export class AccountPickerController extends EventEmitter {
       allKeysOnPage: this.allKeysOnPage,
       selectedAccounts: this.selectedAccounts,
       addedAccountsFromCurrentSession: this.addedAccountsFromCurrentSession,
+      shouldListSmartAccountKeys: this.shouldListSmartAccountKeys,
       type: this.type,
       subType: this.subType,
       isPageLocked: this.isPageLocked
