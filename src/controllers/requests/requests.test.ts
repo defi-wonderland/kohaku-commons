@@ -9,7 +9,7 @@ import { Session } from '../../classes/session'
 import humanizerInfo from '../../consts/humanizer/humanizerInfo.json'
 import { networks } from '../../consts/networks'
 import { RPCProviders } from '../../interfaces/provider'
-import { UserRequest } from '../../interfaces/userRequest'
+import { Calls, UserRequest } from '../../interfaces/userRequest'
 import { HumanizerMeta } from '../../libs/humanizer/interfaces'
 import { relayerCall } from '../../libs/relayerCall/relayerCall'
 import { getRpcProvider } from '../../services/provider'
@@ -456,6 +456,54 @@ describe('RequestsController ', () => {
       await rejectInOneGo(ids.slice(30))
 
       expect(controller.rejectedUserRequestIds).toEqual(ids.slice(-50))
+    })
+
+    test('an id passed once per call of its request is recorded once', async () => {
+      const { controller } = await prepareTest()
+      await controller.addUserRequests([callsRequest('multi')])
+
+      await controller.rejectUserRequests(
+        'User rejected the transaction request.',
+        ['multi', 'multi', 'multi'],
+        { isUserRejection: true }
+      )
+
+      expect(controller.rejectedUserRequestIds).toEqual(['multi'])
+    })
+
+    test('a rejection of a request with several calls evicts only one older id', async () => {
+      const { controller } = await prepareTest()
+      const ids = Array.from({ length: 49 }, (_, i) => `request-${i}`)
+      await controller.addUserRequests(ids.map(callsRequest))
+      await controller.rejectUserRequests('User rejected the transaction request.', ids, {
+        isUserRejection: true
+      })
+
+      const threeCalls = callsRequest('three-calls')
+      const [call] = (threeCalls.action as Calls).calls
+      ;(threeCalls.action as Calls).calls = [call, { ...call }, { ...call }]
+      await controller.addUserRequests([threeCalls])
+      await controller.rejectUserRequests(
+        'User rejected the transaction request.',
+        ['three-calls', 'three-calls', 'three-calls'],
+        { isUserRejection: true }
+      )
+
+      expect(controller.rejectedUserRequestIds).toEqual([...ids, 'three-calls'])
+    })
+
+    test('a request accepted again with a rejected id leaves the list', async () => {
+      const { controller } = await prepareTest()
+      await controller.addUserRequests([callsRequest('reused')])
+      await controller.rejectUserRequests('User rejected the transaction request.', ['reused'], {
+        isUserRejection: true
+      })
+      expect(controller.rejectedUserRequestIds).toEqual(['reused'])
+
+      await controller.addUserRequests([callsRequest('reused')])
+
+      expect(controller.rejectedUserRequestIds).toEqual([])
+      expect(controller.userRequests.map((r) => r.id)).toEqual(['reused'])
     })
   })
 })

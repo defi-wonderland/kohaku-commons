@@ -276,6 +276,9 @@ export class RequestsController extends EventEmitter {
           ;(req.action as Calls).calls[i].id = `${req.id}-${i}`
         })
       }
+      this.rejectedUserRequestIds = this.rejectedUserRequestIds.filter(
+        (rejectedId) => rejectedId !== req.id
+      )
       if (actionPosition === 'first') {
         this.userRequests.unshift(req)
       } else {
@@ -528,7 +531,12 @@ export class RequestsController extends EventEmitter {
       }
 
       userRequest.dappPromise?.reject(ethErrors.provider.userRejectedRequest<any>(err))
-      rejectedIds.push(userRequest.id)
+      if (
+        !rejectedIds.includes(userRequest.id) &&
+        !this.rejectedUserRequestIds.includes(userRequest.id)
+      ) {
+        rejectedIds.push(userRequest.id)
+      }
     })
 
     if (options?.isUserRejection && rejectedIds.length) {
