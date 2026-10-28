@@ -1,5 +1,5 @@
-import { SubmittedAccountOp } from "libs/accountOp/submittedAccountOp"
-import { IrCall } from "libs/humanizer/interfaces"
+import { SubmittedAccountOp } from "../accountOp/submittedAccountOp"
+import { IrCall } from "../humanizer/interfaces"
 
 export const humanizeRailgunAccountOp = (submittedAccountOp: SubmittedAccountOp): IrCall[] => {
   const meta = submittedAccountOp.meta as any

@@ -560,58 +560,6 @@ export class SwapAndBridgeController extends EventEmitter {
     }
   ) {
     // Swap & Bridge is disabled in this build
-    return
-
-    // eslint-disable-next-line no-unreachable
-    const { preselectedFromToken, preselectedToToken, fromAmount, activeRouteIdToDelete } =
-      params || {}
-    await this.#initialLoadPromise
-
-    if (this.sessionIds.includes(sessionId)) return
-
-    // reset only if there are no other instances opened/active
-    if (!this.sessionIds.length) {
-      this.reset() // clear prev session form state
-      // for each new session remove the completed activeRoutes from the previous session
-      this.activeRoutes = this.activeRoutes.filter((r) => r.routeStatus !== 'completed')
-      // remove activeRoutes errors from the previous session
-      this.activeRoutes.forEach((r) => {
-        if (r.routeStatus !== 'failed') {
-          // eslint-disable-next-line no-param-reassign
-          delete r.error
-        }
-      })
-      if (this.activeRoutes.length) {
-        // Otherwise there may be an emitUpdate with [] tokens
-        this.isTokenListLoading = true
-
-        // update the activeRoute.route prop for the new session
-        this.activeRoutes.forEach((r) => {
-          // eslint-disable-next-line @typescript-eslint/no-floating-promises
-          this.updateActiveRoute(r.activeRouteId, undefined, true)
-        })
-      }
-    }
-
-    this.sessionIds.push(sessionId)
-    // do not await the health status check to prevent UI freeze while fetching
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    this.#serviceProviderAPI.updateHealth()
-    await this.updatePortfolioTokenList(this.#selectedAccount.portfolio.tokens, {
-      preselectedToken: preselectedFromToken,
-      preselectedToToken,
-      fromAmount
-    })
-    this.isTokenListLoading = false
-    // Do not await on purpose as it's not critical for the controller state to be ready
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    this.#fetchSupportedChainsIfNeeded()
-
-    if (activeRouteIdToDelete) {
-      this.removeActiveRoute(activeRouteIdToDelete, false)
-    }
-
-    this.#emitUpdateIfNeeded()
   }
 
   get isHealthy() {
